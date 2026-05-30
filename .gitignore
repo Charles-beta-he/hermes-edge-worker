@@ -1,0 +1,11 @@
+# Generated runtime/report artifacts
+event_store.jsonl
+architecture_link_check_report.json
+architecture_self_check.json
+ci_report.json
+self_check_report.json
+__pycache__/
+*.pyc
+
+# Local backups
+*.backup

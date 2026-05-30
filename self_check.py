@@ -234,36 +234,66 @@ class SelfChecker:
         return result
 
     def check_security(self) -> Dict[str, Any]:
-        """基础安全边界：扫描高风险明文密钥/危险命令，报告警告但不把文档化示例等同漏洞。"""
+        """安全边界：runtime 高危 fail-closed，文档/测试/安装示例只计 warning。"""
         print("\n=== 检查安全边界 ===")
         critical_patterns = [
-            re.compile(r"(?i)(api[_-]?key|secret|password)\s*=\s*['\"][^'\"]{12,}['\"]"),
+            re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]{12,}['\"]"),
             re.compile(r"(?i)bearer\s+[a-z0-9._\-]{20,}"),
         ]
         warning_patterns = [
             re.compile(r"curl\s+[^\n]*\|\s*bash"),
             re.compile(r"hermes-2024"),
+            re.compile(r"your-secret-token|changeme|change-me", re.IGNORECASE),
         ]
-        critical = []
-        warnings = []
-        for path in self._iter_files((".py", ".sh", ".yaml", ".yml")):
+        placeholder_re = re.compile(r"your-secret-token|changeme|change-me|<token>|\*\*\*", re.IGNORECASE)
+        doc_suffixes = {".md", ".txt"}
+        runtime_suffixes = {".py", ".sh", ".bash", ".yaml", ".yml"}
+
+        def bucket_for(path: Path) -> str:
+            rel_parts = set(path.relative_to(self.project_path).parts)
+            if path.suffix in doc_suffixes or path.name.startswith("test_") or "tests" in rel_parts:
+                return "doc"
+            return "runtime"
+
+        runtime_critical = []
+        runtime_warnings = []
+        doc_warnings = []
+        for path in self._iter_files(tuple(runtime_suffixes | doc_suffixes)):
             text = path.read_text(encoding="utf-8", errors="ignore")
             rel = str(path.relative_to(self.project_path))
+            bucket = bucket_for(path)
             for pattern in critical_patterns:
                 for match in pattern.finditer(text):
-                    critical.append({"file": rel, "pattern": pattern.pattern, "offset": match.start()})
+                    snippet = text[match.start():match.end()]
+                    finding = {"file": rel, "pattern": pattern.pattern, "offset": match.start()}
+                    if placeholder_re.search(snippet) or bucket == "doc":
+                        doc_warnings.append(finding)
+                    else:
+                        runtime_critical.append(finding)
             for pattern in warning_patterns:
                 for match in pattern.finditer(text):
-                    warnings.append({"file": rel, "pattern": pattern.pattern, "offset": match.start()})
+                    finding = {"file": rel, "pattern": pattern.pattern, "offset": match.start()}
+                    if bucket == "runtime":
+                        runtime_warnings.append(finding)
+                    else:
+                        doc_warnings.append(finding)
+        warnings = runtime_warnings + doc_warnings
         result = {
-            "critical_count": len(critical),
+            "runtime_critical_count": len(runtime_critical),
+            "runtime_warning_count": len(runtime_warnings),
+            "doc_warning_count": len(doc_warnings),
+            "critical_count": len(runtime_critical),
             "warning_count": len(warnings),
-            "critical": critical[:20],
+            "runtime_critical": runtime_critical[:20],
+            "runtime_warnings": runtime_warnings[:20],
+            "doc_warnings": doc_warnings[:20],
+            "critical": runtime_critical[:20],
             "warnings": warnings[:20],
-            "status": "PASS" if not critical else "FAIL",
+            "status": "PASS" if not runtime_critical else "FAIL",
         }
-        print(f"  高危问题: {len(critical)}")
-        print(f"  警告项: {len(warnings)}")
+        print(f"  Runtime高危问题: {len(runtime_critical)}")
+        print(f"  Runtime警告项: {len(runtime_warnings)}")
+        print(f"  文档/测试警告项: {len(doc_warnings)}")
         print(f"  状态: {result['status']}")
         return result
 
