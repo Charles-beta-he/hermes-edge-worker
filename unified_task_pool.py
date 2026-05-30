@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-统一任务池适配器
-唯一事实源原则：本地大脑作为唯一事实源
+Brain task pool adapter.
+
+唯一事实源原则：本地大脑 / brain_task_orchestrator.py 是任务状态 SSOT。
+本模块只负责把任务创建、查询、状态更新和 Edge Worker 分配桥接到 Brain，
+自身的 metrics/task_assignments 只能作为运行时观测与路由缓存，不能作为最终生命周期依据。
 """
 
 import json
@@ -24,7 +27,12 @@ class TaskPriority(Enum):
     CRITICAL = 4
 
 class UnifiedTaskPool:
-    """统一任务池适配器"""
+    """Brain task pool adapter.
+
+    Do not treat this object as a second task database. Production state must be
+    created, read and closed through brain_orchestrator; local fields are only
+    routing/metrics caches for Edge Worker assignment.
+    """
     
     def __init__(self, brain_orchestrator=None):
         self.brain_orchestrator = brain_orchestrator

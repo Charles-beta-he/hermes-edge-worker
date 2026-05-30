@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """
-任务池管理器
-Agent Team多节点落地核心组件
+Legacy in-memory task pool.
+
+生产 SSOT 不是本文件。生产任务状态、生命周期、proof gates 必须以
+Hermes Local Brain / brain_task_orchestrator.py 为唯一事实源。
+
+本模块只保留为：
+- 单元测试夹具
+- 早期 Agent Team 原型兼容
+- 本地内存算法实验
+
+禁止在生产链路中把这里的 COMPLETED/FAILED 当作最终任务生命周期状态。
 """
 
 import json
