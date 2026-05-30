@@ -9,8 +9,7 @@ INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 LINK_DIR="$HOME/.local/bin"
 MAIN_NODE="http://192.168.31.71:9001"
-TOKEN="hermes-2024"
-
+TOKEN="herm...n
 # 颜色
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -156,8 +155,12 @@ case "${1:-start}" in
     logs)
         tail -f "$SCRIPT_DIR/logs/worker.log"
         ;;
+    update)
+        echo "更新Edge Worker..."
+        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh" | bash
+        ;;
     *)
-        echo "用法: hermes-edge {start|stop|restart|status|logs}"
+        echo "用法: hermes-edge {start|stop|restart|status|logs|update}"
         ;;
 esac
 CLI_EOF
@@ -223,5 +226,6 @@ echo "║    hermes-edge status   查看状态                 ║"
 echo "║    hermes-edge logs     查看日志                 ║"
 echo "║    hermes-edge restart  重启服务                 ║"
 echo "║    hermes-edge stop     停止服务                 ║"
+echo "║    hermes-edge update   更新到最新版本           ║"
 echo "║                                                  ║"
 echo "╚══════════════════════════════════════════════════╝"
