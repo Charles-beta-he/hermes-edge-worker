@@ -223,15 +223,54 @@ def register_with_brain():
 args_port = 9000
 
 
+def load_config():
+    """Load config.yaml if it exists (stdlib only, no pyyaml dependency)."""
+    config_path = Path(__file__).parent / "config.yaml"
+    if not config_path.exists():
+        return {}
+    config = {}
+    try:
+        import yaml
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+        # Flatten nested config
+        if 'worker' in raw:
+            config.update({k: v for k, v in raw['worker'].items() if v is not None})
+        if 'security' in raw and 'token' in raw['security']:
+            config.setdefault('token', raw['security']['token'])
+    except ImportError:
+        # Fallback: simple regex parser for flat YAML
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or ':' not in line:
+                    continue
+                key, _, val = line.partition(':')
+                key, val = key.strip(), val.strip().strip('"').strip("'")
+                if val.lower() == 'true':
+                    val = True
+                elif val.lower() == 'false':
+                    val = False
+                elif val.isdigit():
+                    val = int(val)
+                config[key] = val
+    except Exception:
+        pass
+    return config
+
+
 def main():
     global BRAIN_URL, WORKER_NAME, args_port
     
+    # Load config.yaml first (provides defaults)
+    cfg = load_config()
+    
     import argparse
     parser = argparse.ArgumentParser(description='Hermes Edge Worker')
-    parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', type=int, default=9000)
-    parser.add_argument('--brain-url', default=None, help='Brain API URL (e.g., http://localhost:8000)')
-    parser.add_argument('--name', default='local-worker', help='Worker name')
+    parser.add_argument('--host', default=cfg.get('host', '0.0.0.0'))
+    parser.add_argument('--port', type=int, default=int(cfg.get('port', 9002)))
+    parser.add_argument('--brain-url', default=cfg.get('main_node'), help='Brain API URL (e.g., http://localhost:8000)')
+    parser.add_argument('--name', default=cfg.get('name', 'local-worker'), help='Worker name')
     args = parser.parse_args()
     
     BRAIN_URL = args.brain_url
