@@ -113,16 +113,18 @@ case "${1:-start}" in
         if [ "$2" = "--daemon" ] || [ "$2" = "-d" ] || [ -z "$2" ]; then
             # 默认后台启动
             if [ -f "$SCRIPT_DIR/worker.pid" ] && kill -0 $(cat "$SCRIPT_DIR/worker.pid") 2>/dev/null; then
-                echo "已在运行 (PID: $(cat $SCRIPT_DIR/worker.pid))"
+                PID=$(cat "$SCRIPT_DIR/worker.pid")
+                echo "已在运行 PID: $PID"
                 exit 0
             fi
             nohup $PYTHON "$WORKER_SCRIPT" > "$SCRIPT_DIR/logs/worker.log" 2>&1 &
             echo $! > "$SCRIPT_DIR/worker.pid"
             sleep 1
             if kill -0 $(cat "$SCRIPT_DIR/worker.pid") 2>/dev/null; then
-                echo "✓ 已启动 (PID: $(cat $SCRIPT_DIR/worker.pid))"
+                PID=$(cat "$SCRIPT_DIR/worker.pid")
+                echo "已启动 PID: $PID"
             else
-                echo "✗ 启动失败"
+                echo "启动失败"
                 cat "$SCRIPT_DIR/logs/worker.log" | tail -5
                 exit 1
             fi
@@ -134,7 +136,7 @@ case "${1:-start}" in
     stop)
         if [ -f "$SCRIPT_DIR/worker.pid" ]; then
             PID=$(cat "$SCRIPT_DIR/worker.pid")
-            kill $PID 2>/dev/null && echo "✓ 已停止" || echo "进程已退出"
+            kill $PID 2>/dev/null && echo "已停止" || echo "进程已退出"
             rm -f "$SCRIPT_DIR/worker.pid"
         else
             echo "未运行"
@@ -147,9 +149,10 @@ case "${1:-start}" in
         ;;
     status)
         if [ -f "$SCRIPT_DIR/worker.pid" ] && kill -0 $(cat "$SCRIPT_DIR/worker.pid") 2>/dev/null; then
-            echo "✓ 运行中 (PID: $(cat $SCRIPT_DIR/worker.pid))"
+            PID=$(cat "$SCRIPT_DIR/worker.pid")
+            echo "运行中 PID: $PID"
         else
-            echo "✗ 未运行"
+            echo "未运行"
         fi
         ;;
     logs)
