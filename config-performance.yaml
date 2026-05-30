@@ -1,0 +1,78 @@
+# 性能优化配置
+# 三模型讨论优化版
+
+performance:
+  # 分布式配置
+  distributed: true
+  max_nodes: 4
+  
+  # 负载均衡
+  load_balancing: "round_robin"
+  
+  # 缓存配置
+  cache:
+    enabled: true
+    ttl: 3600
+    max_size: 1000
+  
+  # 请求优化
+  request:
+    batch_size: 10
+    timeout: 30
+    retry_count: 3
+    compression: true
+  
+  # 资源管理
+  resources:
+    max_connections: 100
+    connection_pool: 10
+    memory_limit: "512MB"
+  
+  # 监控配置
+  monitoring:
+    enabled: true
+    metrics_interval: 60
+    health_check_interval: 30
+
+# 多模型配置
+models:
+  - name: "mimo-v2.5-pro"
+    provider: "xiaomi"
+    priority: 1
+    rate_limit: 60
+    
+  - name: "claude-opus-4-7"
+    provider: "anthropic"
+    priority: 2
+    rate_limit: 30
+    
+  - name: "deepseek-v4-pro"
+    provider: "deepseek"
+    priority: 3
+    rate_limit: 60
+
+# 节点配置
+nodes:
+  - name: "main"
+    host: "192.168.31.71"
+    port: 9001
+    role: "master"
+    
+  - name: "worker-1"
+    host: "192.168.31.130"
+    port: 9002
+    role: "worker"
+
+# API密钥池
+api_keys:
+  - name: "key-1"
+    provider: "xiaomi"
+    key: "your-api-key-1"
+    
+  - name: "key-2"
+    provider: "xiaomi"
+    key: "your-api-key-2"
+    
+  - name: "key-3"
+    provider: "anthropic"
+    key: "your-api-key-3"
