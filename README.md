@@ -11,6 +11,42 @@ curl -sSLk https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/
 - ✅ 正确处理符号链接
 - ✅ 完整的CLI工具
 - ✅ 友好的用户提示
+- ✅ **兼容现有安装**
+- ✅ **自动升级**
+- ✅ **配置保留**
+
+## 兼容性和升级
+
+### 自动升级
+- 运行安装脚本时自动检测现有安装
+- 比较版本号，只在有新版本时升级
+- 自动备份现有文件
+- 保留用户配置
+
+### 升级流程
+```bash
+# 检查当前版本
+hermes-edge status
+
+# 升级到最新版本
+hermes-edge update
+
+# 或重新运行安装脚本
+curl -sSLk https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-final.sh | bash
+```
+
+### 回滚功能
+```bash
+# 查看可用备份
+hermes-edge rollback
+
+# 选择备份版本回滚
+```
+
+### 配置保留
+- 升级时自动备份配置文件
+- 新配置保存为 `config.yaml.new`
+- 用户可选择是否使用新配置
 
 ## 其他安装方式
 
@@ -55,6 +91,9 @@ hermes-edge config
 
 # 更新
 hermes-edge update
+
+# 回滚
+hermes-edge rollback
 
 # 卸载
 hermes-edge uninstall
@@ -111,6 +150,9 @@ echo $PATH | grep -q "$HOME/.local/bin" || echo 'export PATH="$HOME/.local/bin:$
 hermes-edge logs
 ```
 
+### 问题4：升级后配置丢失
+配置文件已备份到 `~/.hermes/edge-worker/backups/` 目录。
+
 ## 文件结构
 
 ```
@@ -119,19 +161,22 @@ hermes-edge logs
 ├── hermes_lan.py       # 局域网发现
 ├── config.yaml         # 配置文件
 ├── hermes-edge         # CLI工具
+├── version.txt         # 版本号
 ├── worker.pid          # 进程ID（运行时）
 ├── logs/               # 日志目录
 │   └── worker.log
 └── backups/            # 备份目录
+    └── backup-YYYYMMDDHHMMSS/
 ```
 
 ## 更新日志
 
 ### v1.1.0 (2026-05-30)
-- 添加 `install-final.sh` 最终优化版本
-- 修复符号链接路径解析问题
-- 添加自动SSL检测
-- 改进CLI用户体验
+- 添加兼容性和自动升级支持
+- 自动备份现有文件
+- 保留用户配置
+- 版本检查和升级
+- 回滚功能
 
 ### v1.0.0 (2026-05-30)
 - 初始版本
