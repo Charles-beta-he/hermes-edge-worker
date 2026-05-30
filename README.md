@@ -3,8 +3,8 @@
 ## 安装
 
 ```bash
-# 从私人仓库安装
-curl -sSL https://raw.githubusercontent.com/Charles-beta-he/personal-hermes-brain/main/hermes/scripts/edge-worker/install.sh | bash
+# 从GitHub安装
+curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh | bash
 ```
 
 ## 使用
@@ -31,7 +31,7 @@ hermes-edge logs
 
 ```bash
 # 重新运行安装脚本
-curl -sSL https://raw.githubusercontent.com/Charles-beta-he/personal-hermes-brain/main/hermes/scripts/edge-worker/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh | bash
 ```
 
 ## 主节点信息

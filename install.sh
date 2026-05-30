@@ -1,17 +1,14 @@
 #!/bin/bash
 # Hermes Edge Worker 安装脚本
-# 从私人仓库安装
-
 set -e
 
 INSTALL_DIR="$HOME/.hermes/edge-worker"
-REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/personal-hermes-brain/main/hermes/scripts/edge-worker"
+REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 
 echo "╔══════════════════════════════════════════════════╗"
 echo "║       Hermes Edge Worker 安装                    ║"
 echo "╚══════════════════════════════════════════════════╝"
 
-# 检查Python
 if ! command -v python3 &>/dev/null; then
     echo "[✗] 需要Python 3.8+"
     exit 1
@@ -19,16 +16,13 @@ fi
 
 echo "[✓] Python $(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 
-# 创建目录
 mkdir -p "$INSTALL_DIR"/{logs,backups}
 
-# 下载文件
 echo "[*] 下载Edge Worker..."
 curl -sSL "$REPO_URL/edge_worker.py" -o "$INSTALL_DIR/edge_worker.py"
 curl -sSL "$REPO_URL/hermes_lan.py" -o "$INSTALL_DIR/hermes_lan.py"
 curl -sSL "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml"
 
-# 创建CLI包装器
 cat > "$INSTALL_DIR/hermes-edge" << 'CLI_EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,7 +60,6 @@ esac
 CLI_EOF
 chmod +x "$INSTALL_DIR/hermes-edge"
 
-# 创建符号链接
 mkdir -p "$HOME/.local/bin"
 ln -sf "$INSTALL_DIR/hermes-edge" "$HOME/.local/bin/hermes-edge"
 
