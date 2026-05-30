@@ -1,0 +1,28 @@
+# Hermes Edge Worker Configuration
+# 使用时请修改以下配置
+
+worker:
+  name: "your-hostname"  # 修改为你的主机名
+  host: "0.0.0.0"
+  port: 9001
+  brain_url: ""
+  auto_discover: true
+  discover_interval: 30
+  heartbeat_interval: 30
+  reconnect_interval: 10
+
+security:
+  token: "your-secret-token"  # 修改为你的token
+  allowed_commands: []
+  max_timeout: 300
+
+logging:
+  level: "info"
+  file: "~/.hermes/edge-worker/logs/edge.log"
+  max_size: "10MB"
+  max_files: 5
+
+updates:
+  auto_check: true
+  check_interval: 3600
+  source: "https://raw.githubusercontent.com/Charles-beta-he/personal-hermes-brain/main/hermes/scripts/edge-worker"
