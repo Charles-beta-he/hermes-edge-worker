@@ -1,12 +1,14 @@
 #!/bin/bash
 # Hermes Edge Worker 最终安装脚本
-# 解决：SSL问题、路径解析、用户体验
+# 支持：兼容现有安装、自动升级、配置保留
 
 set -e
 
 INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 LINK_DIR="$HOME/.local/bin"
+BACKUP_DIR="$INSTALL_DIR/backups"
+VERSION_FILE="$INSTALL_DIR/version.txt"
 
 # 颜色
 GREEN='\033[0;32m'
@@ -22,7 +24,7 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 
 echo "╔══════════════════════════════════════════════════╗"
 echo "║       Hermes Edge Worker 安装                    ║"
-echo "║       (最终优化版本)                             ║"
+echo "║       (最终优化版本 - 支持升级)                  ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
@@ -34,10 +36,39 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 log "Python $PYTHON_VERSION"
 
+# 检测现有安装
+EXISTING_INSTALL=false
+CURRENT_VERSION=""
+if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/edge_worker.py" ]; then
+    EXISTING_INSTALL=true
+    if [ -f "$VERSION_FILE" ]; then
+        CURRENT_VERSION=$(cat "$VERSION_FILE")
+    else
+        CURRENT_VERSION="unknown"
+    fi
+    info "检测到现有安装（版本: $CURRENT_VERSION）"
+fi
+
 # 创建目录
 info "创建目录结构..."
 mkdir -p "$INSTALL_DIR"/{logs,backups,src}
 mkdir -p "$LINK_DIR"
+
+# 备份现有文件（如果是升级）
+if [ "$EXISTING_INSTALL" = true ]; then
+    BACKUP_TIMESTAMP=$(date '+%Y%m%d%H%M%S')
+    BACKUP_PATH="$BACKUP_DIR/backup-$BACKUP_TIMESTAMP"
+    info "备份现有文件到: $BACKUP_PATH"
+    mkdir -p "$BACKUP_PATH"
+    
+    # 备份关键文件
+    [ -f "$INSTALL_DIR/edge_worker.py" ] && cp "$INSTALL_DIR/edge_worker.py" "$BACKUP_PATH/"
+    [ -f "$INSTALL_DIR/hermes_lan.py" ] && cp "$INSTALL_DIR/hermes_lan.py" "$BACKUP_PATH/"
+    [ -f "$INSTALL_DIR/config.yaml" ] && cp "$INSTALL_DIR/config.yaml" "$BACKUP_PATH/"
+    [ -f "$INSTALL_DIR/hermes-edge" ] && cp "$INSTALL_DIR/hermes-edge" "$BACKUP_PATH/"
+    
+    log "备份完成"
+fi
 
 # 检测SSL问题
 info "检测网络环境..."
@@ -47,11 +78,49 @@ if ! curl -sSL --connect-timeout 5 "$REPO_URL/install-final.sh" >/dev/null 2>&1;
     CURL_OPTS="-sSLk"
 fi
 
+# 下载新版本号
+info "检查最新版本..."
+LATEST_VERSION=$(curl $CURL_OPTS "$REPO_URL/version.txt" 2>/dev/null || echo "1.0.0")
+log "最新版本: $LATEST_VERSION"
+
+# 检查是否需要升级
+if [ "$EXISTING_INSTALL" = true ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    log "已是最新版本，跳过升级"
+    echo ""
+    echo "如需强制重新安装，请先删除 $INSTALL_DIR"
+    exit 0
+fi
+
 # 下载文件
-info "下载Edge Worker组件..."
+if [ "$EXISTING_INSTALL" = true ]; then
+    info "升级Edge Worker ($CURRENT_VERSION -> $LATEST_VERSION)..."
+else
+    info "安装Edge Worker ($LATEST_VERSION)..."
+fi
+
 curl $CURL_OPTS "$REPO_URL/edge_worker.py" -o "$INSTALL_DIR/edge_worker.py" || error "下载edge_worker.py失败"
 curl $CURL_OPTS "$REPO_URL/hermes_lan.py" -o "$INSTALL_DIR/hermes_lan.py" || error "下载hermes_lan.py失败"
-curl $CURL_OPTS "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml" || error "下载config.yaml失败"
+
+# 配置文件处理（保留用户配置）
+if [ "$EXISTING_INSTALL" = true ] && [ -f "$INSTALL_DIR/config.yaml" ]; then
+    # 下载新配置到临时文件
+    curl $CURL_OPTS "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml.new" || error "下载config.yaml失败"
+    
+    # 比较配置文件
+    if diff -q "$INSTALL_DIR/config.yaml" "$INSTALL_DIR/config.yaml.new" >/dev/null 2>&1; then
+        rm "$INSTALL_DIR/config.yaml.new"
+        log "配置文件无变化"
+    else
+        warn "检测到配置文件更新"
+        info "现有配置已保留，新配置保存为: config.yaml.new"
+        info "如需使用新配置，请运行: mv $INSTALL_DIR/config.yaml.new $INSTALL_DIR/config.yaml"
+    fi
+else
+    curl $CURL_OPTS "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml" || error "下载config.yaml失败"
+fi
+
+# 更新版本号
+echo "$LATEST_VERSION" > "$VERSION_FILE"
 
 log "文件下载完成"
 
@@ -84,6 +153,10 @@ if [ ! -f "$WORKER_SCRIPT" ]; then
     echo "请重新运行安装脚本"
     exit 1
 fi
+
+# 版本信息
+VERSION="unknown"
+[ -f "$SCRIPT_DIR/version.txt" ] && VERSION=$(cat "$SCRIPT_DIR/version.txt")
 
 case "${1:-help}" in
     start)
@@ -129,6 +202,8 @@ case "${1:-help}" in
         $0 start --daemon
         ;;
     status)
+        echo "Hermes Edge Worker v$VERSION"
+        echo ""
         if [ -f "$SCRIPT_DIR/worker.pid" ]; then
             PID=$(cat "$SCRIPT_DIR/worker.pid")
             if kill -0 $PID 2>/dev/null; then
@@ -154,8 +229,25 @@ case "${1:-help}" in
         ${EDITOR:-nano} "$SCRIPT_DIR/config.yaml"
         ;;
     update)
-        echo "更新Edge Worker..."
+        echo "当前版本: $VERSION"
+        echo "检查更新..."
         curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-final.sh" | bash
+        ;;
+    rollback)
+        if [ -d "$SCRIPT_DIR/backups" ]; then
+            echo "可用备份:"
+            ls -lt "$SCRIPT_DIR/backups" | head -5
+            echo ""
+            read -p "输入备份目录名（或留空取消）: " backup_name
+            if [ -n "$backup_name" ] && [ -d "$SCRIPT_DIR/backups/$backup_name" ]; then
+                echo "回滚到: $backup_name"
+                cp "$SCRIPT_DIR/backups/$backup_name"/*.py "$SCRIPT_DIR/" 2>/dev/null || true
+                cp "$SCRIPT_DIR/backups/$backup_name"/config.yaml "$SCRIPT_DIR/" 2>/dev/null || true
+                echo "✓ 回滚完成"
+            fi
+        else
+            echo "没有可用的备份"
+        fi
         ;;
     uninstall)
         read -p "确定要卸载Edge Worker吗？(y/N) " confirm
@@ -167,7 +259,7 @@ case "${1:-help}" in
         fi
         ;;
     help|*)
-        echo "Hermes Edge Worker CLI"
+        echo "Hermes Edge Worker CLI v$VERSION"
         echo ""
         echo "用法: hermes-edge <command>"
         echo ""
@@ -179,6 +271,7 @@ case "${1:-help}" in
         echo "  logs              查看日志"
         echo "  config            编辑配置"
         echo "  update            更新到最新版本"
+        echo "  rollback          回滚到备份版本"
         echo "  uninstall         卸载"
         echo "  help              显示此帮助"
         ;;
@@ -200,9 +293,19 @@ fi
 
 # 显示完成信息
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║                   安装完成！                      ║"
-echo "╠══════════════════════════════════════════════════╣"
+if [ "$EXISTING_INSTALL" = true ]; then
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║                   升级完成！                      ║"
+    echo "╠══════════════════════════════════════════════════╣"
+    echo "║ 版本: $CURRENT_VERSION -> $LATEST_VERSION"
+    echo "║ 备份: $BACKUP_PATH"
+else
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║                   安装完成！                      ║"
+    echo "╠══════════════════════════════════════════════════╣"
+    echo "║ 版本: $LATEST_VERSION"
+fi
+
 echo "║ 安装目录: $INSTALL_DIR"
 echo "║ 命令位置: $LINK_DIR/hermes-edge"
 echo "╠══════════════════════════════════════════════════╣"
