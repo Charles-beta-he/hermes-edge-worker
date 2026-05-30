@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-05-30T23:25:26.054241",
+  "timestamp": "2026-05-30T23:31:07.758094",
   "project_dir": "/Users/charles/hermes-edge-worker",
   "checks": {
     "test_coverage": {
-      "test_files": 1,
+      "test_files": 2,
       "source_files": 22,
-      "coverage": 4.545454545454546,
+      "coverage": 9.090909090909092,
       "status": "FAIL"
     },
     "code_quality": {
@@ -30,7 +30,7 @@
     "tests": {
       "status": "UNKNOWN",
       "returncode": 0,
-      "output": "=== \u8fd0\u884c\u6838\u5fc3\u7ec4\u4ef6\u6d4b\u8bd5 ===\n\n=== \u6d4b\u8bd5\u7ed3\u679c ===\n\u8fd0\u884c\u6d4b\u8bd5: 18\n\u5931\u8d25: 0\n\u9519\u8bef: 0\n\u6210\u529f\u7387: 100.0%\n"
+      "output": "=== \u8fd0\u884c\u5b8c\u6574\u6d4b\u8bd5\u5957\u4ef6 ===\n\n=== \u6d4b\u8bd5\u7ed3\u679c ===\n\u8fd0\u884c\u6d4b\u8bd5: 25\n\u5931\u8d25: 0\n\u9519\u8bef: 0\n\u6210\u529f\u7387: 100.0%\n"
     }
   },
   "overall_status": "FAIL"

@@ -178,7 +178,7 @@ class SelfChecker:
         """运行测试"""
         print("\n=== 运行测试 ===")
         
-        test_file = os.path.join(self.project_dir, "test_core_components.py")
+        test_file = os.path.join(self.project_dir, "test_complete.py")
         if not os.path.exists(test_file):
             return {"status": "SKIP", "reason": "测试文件不存在"}
         
