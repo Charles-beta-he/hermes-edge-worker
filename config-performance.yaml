@@ -7,7 +7,7 @@ performance:
   max_nodes: 4
   
   # 负载均衡
-  load_balancing: "round_robin"
+  load_balancing: "consistent_hash"
   
   # 缓存配置
   cache:
