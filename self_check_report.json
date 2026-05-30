@@ -1,15 +1,18 @@
 {
-  "timestamp": "2026-05-30T23:31:07.758094",
+  "timestamp": "2026-05-31T04:28:16.686496",
   "project_dir": "/Users/charles/hermes-edge-worker",
   "checks": {
     "test_coverage": {
-      "test_files": 2,
-      "source_files": 22,
-      "coverage": 9.090909090909092,
-      "status": "FAIL"
+      "test_files": 40,
+      "source_files": 40,
+      "mapped_source_files": 39,
+      "missing_tests": [],
+      "coverage": 100.0,
+      "status": "PASS"
     },
     "code_quality": {
       "syntax_errors": 0,
+      "errors": [],
       "status": "PASS"
     },
     "component_integration": {
@@ -19,7 +22,7 @@
     },
     "documentation": {
       "readme_exists": true,
-      "architecture_docs": 6,
+      "architecture_docs": 10,
       "status": "PASS"
     },
     "deployment": {
@@ -28,10 +31,111 @@
       "status": "PASS"
     },
     "tests": {
-      "status": "UNKNOWN",
+      "status": "PASS",
       "returncode": 0,
-      "output": "=== \u8fd0\u884c\u5b8c\u6574\u6d4b\u8bd5\u5957\u4ef6 ===\n\n=== \u6d4b\u8bd5\u7ed3\u679c ===\n\u8fd0\u884c\u6d4b\u8bd5: 25\n\u5931\u8d25: 0\n\u9519\u8bef: 0\n\u6210\u529f\u7387: 100.0%\n"
+      "command": "/usr/bin/python3 -m pytest test_agent_team.py test_api.py test_architecture_link_check.py test_architecture_self_check.py test_ci_automation.py test_complete.py test_core_components.py test_core_features.py test_edge_worker.py test_edge_worker_executor.py test_event_driven.py test_fault_tolerance.py test_feedback_system.py test_hermes_lan.py test_integration.py test_knowledge_api.py test_knowledge_manager.py test_load_balancer.py test_multi_model_analyzer.py test_multi_site_manager.py test_rag_api.py test_rag_knowledge_manager.py test_refactor_architecture.py test_self_check.py test_self_check_boundary.py test_simplified_api.py test_simplified_gateway.py test_site_registrar.py test_task_event_driven.py test_task_pool.py test_task_pool_event_integration.py test_task_scheduler.py test_tree_cache.py test_unified_api.py test_unified_data_layer.py test_unified_event_bus.py test_unified_gateway.py test_unified_interface_layer.py test_unified_manager.py test_unified_task_pool.py -q",
+      "test_files": 40,
+      "output": "........................................................................ [ 43%]\n........................................................................ [ 86%]\n.......................                                                  [100%]\n=============================== warnings summary ===============================\ntest_architecture_link_check.py::TestArchitectureLinkCheck::test_import\n  /Users/charles/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020\n    warnings.warn(\n\ntest_complete.py: 5 warnings\ntest_core_components.py: 3 warnings\ntest_integration.py: 3 warnings\n  /Users/charles/Library/Python/3.9/lib/python/site-packages/sklearn/feature_extraction/text.py:517: UserWarning: The parameter 'token_pattern' will not be used since 'tokenizer' is not None'\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n167 passed, 12 warnings in 4.27s\n\n"
+    },
+    "performance": {
+      "source_files": 40,
+      "test_files": 40,
+      "duration_ms": 0.968,
+      "threshold_ms": 500.0,
+      "status": "PASS"
+    },
+    "security": {
+      "critical_count": 0,
+      "warning_count": 7,
+      "critical": [],
+      "warnings": [
+        {
+          "file": "install-auto.sh",
+          "pattern": "curl\\s+[^\\n]*\\|\\s*bash",
+          "offset": 49
+        },
+        {
+          "file": "install-auto.sh",
+          "pattern": "curl\\s+[^\\n]*\\|\\s*bash",
+          "offset": 4291
+        },
+        {
+          "file": "install-auto.sh",
+          "pattern": "hermes-2024",
+          "offset": 290
+        },
+        {
+          "file": "install-final.sh",
+          "pattern": "curl\\s+[^\\n]*\\|\\s*bash",
+          "offset": 4161
+        },
+        {
+          "file": "self_check.py",
+          "pattern": "hermes-2024",
+          "offset": 9171
+        },
+        {
+          "file": "verify-installation.sh",
+          "pattern": "hermes-2024",
+          "offset": 1490
+        },
+        {
+          "file": "verify-installation.sh",
+          "pattern": "hermes-2024",
+          "offset": 1642
+        }
+      ],
+      "status": "PASS"
+    },
+    "stress": {
+      "registered_sites": 100,
+      "duration_ms": 0.358,
+      "threshold_ms": 1000.0,
+      "status": "PASS"
+    },
+    "compatibility": {
+      "python_version": "3.14.3",
+      "minimum_python": "3.8",
+      "missing_modules": [],
+      "status": "PASS"
+    },
+    "architecture_links": {
+      "components": 5,
+      "missing_files": [],
+      "missing_methods": [],
+      "status": "PASS"
     }
   },
-  "overall_status": "FAIL"
+  "boundary_coverage": {
+    "required": [
+      "test_coverage",
+      "code_quality",
+      "component_integration",
+      "documentation",
+      "deployment",
+      "tests",
+      "performance",
+      "security",
+      "stress",
+      "compatibility",
+      "architecture_links"
+    ],
+    "present": [
+      "test_coverage",
+      "code_quality",
+      "component_integration",
+      "documentation",
+      "deployment",
+      "tests",
+      "performance",
+      "security",
+      "stress",
+      "compatibility",
+      "architecture_links"
+    ],
+    "missing": [],
+    "coverage": 100.0,
+    "status": "PASS"
+  },
+  "overall_status": "PASS"
 }
