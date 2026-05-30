@@ -9,7 +9,7 @@ INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 LINK_DIR="$HOME/.local/bin"
 MAIN_NODE="http://192.168.31.71:9001"
-TOKEN="herm...n
+TOKEN="hermes-2024"
 # 颜色
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
