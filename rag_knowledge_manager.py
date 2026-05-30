@@ -37,6 +37,10 @@ class ChineseTokenizer:
             if word in text:
                 tokens.append(word)
         
+        # 中文字符（每个字符作为一个词）
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        tokens.extend(chinese_chars)
+        
         # 数字
         numbers = re.findall(r'\d+', text)
         tokens.extend(numbers)

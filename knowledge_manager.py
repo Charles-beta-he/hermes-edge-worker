@@ -280,8 +280,18 @@ class KnowledgeManager:
     
     def _extract_keywords(self, text: str) -> List[str]:
         """提取关键词"""
-        # 简单实现：按空格分词
-        return text.lower().split()
+        import re
+        
+        # 英文单词
+        english_words = re.findall(r'[a-zA-Z]+', text.lower())
+        
+        # 中文字符（每个字符作为一个词）
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        
+        # 合并
+        keywords = english_words + chinese_chars
+        
+        return keywords
     
     def _search(self, query: str, knowledge_type: Optional[KnowledgeType], 
                 top_k: int) -> List[Dict[str, Any]]:
