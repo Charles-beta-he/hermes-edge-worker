@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+import uuid
 import requests
 from typing import Dict, Any, List
 from datetime import datetime
@@ -265,17 +266,21 @@ class ArchitectureLinkCheck:
         print("   测试链路3: 负载均衡 → 任务分配 → 结果返回")
         self._test_load_balancing_link()
     
+    def _task_event_link_payload(self):
+        return {
+            "event_type": "task.created",
+            "event_data": {
+                "event_id": f"architecture-link-check-{uuid.uuid4().hex}",
+                "task_id": "test-task-001",
+                "priority": "P1",
+            },
+        }
+
     def _test_task_event_link(self):
         """测试任务事件链路"""
         try:
-            # 发送任务创建事件
-            response = requests.post("http://localhost:9008/event", json={
-                "event_type": "task.created",
-                "event_data": {
-                    "task_id": "test-task-001",
-                    "priority": "P1"
-                }
-            }, timeout=5)
+            # 发送任务创建事件，显式 event_id 避免重复链路检查被幂等层判 duplicate
+            response = requests.post("http://localhost:9008/event", json=self._task_event_link_payload(), timeout=5)
             
             if response.status_code == 200:
                 self.results["link_tests"]["task_event"] = {"status": "ok"}

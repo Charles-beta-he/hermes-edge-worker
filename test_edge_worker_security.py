@@ -4,6 +4,7 @@
 import hashlib
 import hmac
 import json
+import time
 from pathlib import Path
 
 import edge_worker
@@ -78,7 +79,7 @@ def test_hmac_signature_is_required_when_secret_is_configured(tmp_path):
     configure_security(tmp_path)
     edge_worker.HMAC_SECRET = "hmac-secret"
     body = json.dumps({"action": "run_command", "params": {"command": "echo ok"}}, sort_keys=True).encode()
-    timestamp = "1700000000"
+    timestamp = str(int(time.time()))
     handler = DummyHandler()
     handler.path = "/command"
     handler.command = "POST"
@@ -91,6 +92,16 @@ def test_hmac_signature_is_required_when_secret_is_configured(tmp_path):
     handler.headers["X-Hermes-Signature"] = signature
 
     assert handler._is_authorized(body) is True
+
+
+def _signed_headers(body, timestamp):
+    payload = b"POST\n/command\n" + str(timestamp).encode() + b"\n" + body
+    signature = hmac.new(b"hmac-secret", payload, hashlib.sha256).hexdigest()
+    return {
+        "Authorization": "Bearer secret-token",
+        "X-Hermes-Timestamp": str(timestamp),
+        "X-Hermes-Signature": signature,
+    }
 
 
 def test_hmac_signature_rejects_tampered_body(tmp_path):
@@ -111,3 +122,29 @@ def test_hmac_signature_rejects_tampered_body(tmp_path):
     }
 
     assert handler._is_authorized(tampered_body) is False
+
+
+def test_hmac_signature_rejects_timestamp_outside_replay_window(tmp_path):
+    configure_security(tmp_path)
+    edge_worker.HMAC_SECRET = "hmac-secret"
+    edge_worker.HMAC_MAX_SKEW_SECONDS = 300
+    body = b'{"action":"run_command","params":{"command":"echo ok"}}'
+    handler = DummyHandler()
+    handler.path = "/command"
+    handler.command = "POST"
+    handler.headers = _signed_headers(body, int(time.time()) - 3600)
+
+    assert handler._is_authorized(body) is False
+
+
+def test_hmac_signature_accepts_timestamp_inside_replay_window(tmp_path):
+    configure_security(tmp_path)
+    edge_worker.HMAC_SECRET = "hmac-secret"
+    edge_worker.HMAC_MAX_SKEW_SECONDS = 300
+    body = b'{"action":"run_command","params":{"command":"echo ok"}}'
+    handler = DummyHandler()
+    handler.path = "/command"
+    handler.command = "POST"
+    handler.headers = _signed_headers(body, int(time.time()))
+
+    assert handler._is_authorized(body) is True

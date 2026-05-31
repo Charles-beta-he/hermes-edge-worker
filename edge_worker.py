@@ -41,6 +41,7 @@ BRAIN_URL = None
 WORKER_NAME = None
 SECURITY_TOKEN = None
 HMAC_SECRET = None
+HMAC_MAX_SKEW_SECONDS = 300
 ALLOWED_COMMANDS = []
 ALLOWED_PATHS = []
 MAX_TIMEOUT = 300
@@ -101,6 +102,7 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
                 'security': {
                     'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
                     'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
+                    'hmac_max_skew_seconds': HMAC_MAX_SKEW_SECONDS,
                     'allowed_commands': ALLOWED_COMMANDS,
                     'allowed_paths': ALLOWED_PATHS,
                     'max_timeout': MAX_TIMEOUT,
@@ -157,6 +159,12 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
         timestamp = self.headers.get('X-Hermes-Timestamp', '') if hasattr(self, 'headers') else ''
         signature = self.headers.get('X-Hermes-Signature', '') if hasattr(self, 'headers') else ''
         if not timestamp or not signature:
+            return False
+        try:
+            timestamp_value = float(timestamp)
+        except ValueError:
+            return False
+        if abs(time.time() - timestamp_value) > float(HMAC_MAX_SKEW_SECONDS or 300):
             return False
         method = getattr(self, 'command', 'POST') or 'POST'
         path = urlparse(getattr(self, 'path', '') or '').path
@@ -385,6 +393,7 @@ def register_with_brain():
             'security': {
                 'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
                 'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
+                'hmac_max_skew_seconds': HMAC_MAX_SKEW_SECONDS,
                 'allowed_commands': ALLOWED_COMMANDS,
                 'allowed_paths': ALLOWED_PATHS,
                 'max_timeout': MAX_TIMEOUT,
@@ -444,7 +453,7 @@ def load_config():
 
 
 def configure_runtime(args, cfg):
-    global BRAIN_URL, WORKER_NAME, args_port, SECURITY_TOKEN, HMAC_SECRET, ALLOWED_COMMANDS, ALLOWED_PATHS, MAX_TIMEOUT
+    global BRAIN_URL, WORKER_NAME, args_port, SECURITY_TOKEN, HMAC_SECRET, HMAC_MAX_SKEW_SECONDS, ALLOWED_COMMANDS, ALLOWED_PATHS, MAX_TIMEOUT
     BRAIN_URL = args.brain_url
     WORKER_NAME = args.name
     args_port = args.port
@@ -452,6 +461,7 @@ def configure_runtime(args, cfg):
     hmac_secret = args.hmac_secret or os.environ.get('HERMES_EDGE_HMAC_SECRET') or cfg.get('hmac_secret')
     SECURITY_TOKEN = None if _is_placeholder_secret(token) else str(token)
     HMAC_SECRET = None if _is_placeholder_secret(hmac_secret) else str(hmac_secret)
+    HMAC_MAX_SKEW_SECONDS = int(args.hmac_max_skew_seconds or os.environ.get('HERMES_EDGE_HMAC_MAX_SKEW_SECONDS') or cfg.get('hmac_max_skew_seconds') or 300)
     ALLOWED_COMMANDS = _as_list(args.allowed_command) or _as_list(cfg.get('allowed_commands'))
     ALLOWED_PATHS = _as_list(args.allowed_path) or _as_list(cfg.get('allowed_paths')) or [str(Path.home())]
     MAX_TIMEOUT = int(args.max_timeout or cfg.get('max_timeout') or 300)
@@ -467,6 +477,7 @@ def main():
     parser.add_argument('--name', default=cfg.get('name', 'local-worker'), help='Worker name')
     parser.add_argument('--token', default=None, help='Bearer token required by /info, /execute and /command')
     parser.add_argument('--hmac-secret', default=None, help='Optional HMAC secret required for POST body signatures')
+    parser.add_argument('--hmac-max-skew-seconds', type=int, default=None, help='Maximum allowed HMAC timestamp skew; default 300 seconds')
     parser.add_argument('--allowed-command', action='append', default=[], help='Allowed shell command prefix/token; repeatable')
     parser.add_argument('--allowed-path', action='append', default=[], help='Allowed filesystem sandbox path; repeatable')
     parser.add_argument('--max-timeout', type=int, default=None, help='Maximum command timeout seconds')
@@ -485,7 +496,7 @@ def main():
     if BRAIN_URL:
         print(f"Connected to Brain: {BRAIN_URL}")
     print("Capabilities: run_command, read_file, write_file, list_dir")
-    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, hmac_required={not _is_placeholder_secret(HMAC_SECRET)}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
+    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, hmac_required={not _is_placeholder_secret(HMAC_SECRET)}, hmac_max_skew_seconds={HMAC_MAX_SKEW_SECONDS}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
     print("Press Ctrl+C to stop")
 
     try:

@@ -22,6 +22,7 @@
 - `HMAC_SECRET`
   - 可选；配置后 POST 请求必须携带 `X-Hermes-Timestamp` 与 `X-Hermes-Signature`。
   - 签名 payload: `METHOD\nPATH\nTIMESTAMP\nBODY`，算法 HMAC-SHA256。
+  - 默认要求 timestamp 在 ±300 秒窗口内，可通过 `--hmac-max-skew-seconds` / `HERMES_EDGE_HMAC_MAX_SKEW_SECONDS` 调整，降低重放风险。
   - 用于防止已认证请求体被中间层篡改。
 - `ALLOWED_COMMANDS`
   - `run_command` 必须命中 allowlist。
@@ -40,6 +41,7 @@ CLI 新增：
 python3 edge_worker.py \
   --token "$HERMES_EDGE_TOKEN" \
   --hmac-secret "$HERMES_EDGE_HMAC_SECRET" \
+  --hmac-max-skew-seconds 300 \
   --allowed-command git \
   --allowed-command python3 \
   --allowed-path /Users/charles/hermes-edge-worker \

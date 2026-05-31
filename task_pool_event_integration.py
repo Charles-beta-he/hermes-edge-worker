@@ -8,26 +8,27 @@ import json
 import os
 import sys
 import subprocess
-import time
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
 from pathlib import Path
 
 # 添加脚本目录到路径
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
+from event_reliability import ReliableEventProcessor
+
 class TaskPoolEventIntegration:
     """任务池事件驱动集成"""
     
-    def __init__(self, event_store_path: Optional[Path] = None, max_retries: int = 2):
+    def __init__(self, event_store_path: Optional[Path] = None, max_retries: int = 2, max_store_bytes: int = 5 * 1024 * 1024):
         self.orchestrator_path = Path.home() / ".hermes" / "scripts" / "brain_task_orchestrator.py"
         self.dispatch_tick_path = Path.home() / ".hermes" / "scripts" / "brain_task_dispatch_tick.py"
         self.event_driven_path = SCRIPT_DIR / "task_event_driven.py"
         self.event_store_path = Path(event_store_path) if event_store_path else SCRIPT_DIR / "event_store.jsonl"
         self.max_retries = max(0, int(max_retries))
-        self.processed_event_ids = set()
-        self.dead_letters: List[Dict[str, Any]] = []
+        self.event_processor = ReliableEventProcessor(self.event_store_path, max_retries=self.max_retries, retry_delay=0.01, max_store_bytes=max_store_bytes)
+        self.processed_event_ids = self.event_processor.processed_event_ids
+        self.dead_letters: List[Dict[str, Any]] = self.event_processor.dead_letters
         
         self.metrics = {
             "tasks_processed": 0,
@@ -42,36 +43,25 @@ class TaskPoolEventIntegration:
         """处理任务事件，返回与 9007 一致的可靠 envelope。"""
         event_data = event_data or {}
         event_id = event_data.get("event_id") or self._derive_event_id(event_type, event_data)
+        if event_id and "event_id" not in event_data:
+            event_data = dict(event_data)
+            event_data["event_id"] = event_id
         task_id = event_data.get("task_id", "")
         print(f"[集成] 处理事件: {event_type}, 任务: {task_id}, event_id: {event_id}")
 
-        if event_id in self.processed_event_ids:
+        result = self.event_processor.process(event_type, event_data, lambda data: self._dispatch_event(event_type, data))
+        status = result.get("status")
+        if status == "processed":
+            self.metrics["tasks_processed"] += 1
+        elif status == "duplicate":
             self.metrics["duplicates"] += 1
-            result = {"status": "duplicate", "event_id": event_id, "event_type": event_type, "task_id": task_id}
-            self._record_event(event_id, event_type, event_data, "duplicate", 0, None)
-            return result
-
-        last_error = None
-        for attempt in range(1, self.max_retries + 2):
-            try:
-                self._dispatch_event(event_type, event_data)
-                self.processed_event_ids.add(event_id)
-                self.metrics["tasks_processed"] += 1
-                self._record_event(event_id, event_type, event_data, "processed", attempt, None)
-                return {"status": "processed", "event_id": event_id, "event_type": event_type, "task_id": task_id, "attempts": attempt}
-            except Exception as e:
-                last_error = str(e)
-                self.metrics["errors"] += 1
-                print(f"[错误] 处理事件失败: {event_type}, attempt={attempt}, 错误: {e}")
-                if attempt <= self.max_retries:
-                    self._record_event(event_id, event_type, event_data, "failed_attempt", attempt, last_error)
-                    time.sleep(0.01)
-                    continue
-                dead_letter = {"event_id": event_id, "event_type": event_type, "event_data": event_data, "error": last_error}
-                self.dead_letters.append(dead_letter)
-                self.metrics["dead_letters"] += 1
-                self._record_event(event_id, event_type, event_data, "dead_lettered", attempt, last_error)
-                return {"status": "dead_lettered", "event_id": event_id, "event_type": event_type, "task_id": task_id, "error": last_error, "attempts": attempt}
+        elif status == "dead_lettered":
+            self.metrics["dead_letters"] += 1
+            self.metrics["errors"] += int(result.get("attempts") or result.get("attempt") or 1)
+        attempts = int(result.get("attempts") or result.get("attempt") or 1)
+        if status == "processed" and attempts > 1:
+            self.metrics["errors"] += attempts - 1
+        return result
 
     def _derive_event_id(self, event_type: str, event_data: Dict[str, Any]) -> str:
         task_id = event_data.get("task_id", "unknown")
@@ -79,18 +69,7 @@ class TaskPoolEventIntegration:
         return f"{event_type}:{task_id}:{key_status}"
 
     def _record_event(self, event_id: str, event_type: str, event_data: Dict[str, Any], status: str, attempt: int, error: Optional[str]):
-        self.event_store_path.parent.mkdir(parents=True, exist_ok=True)
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event_id": event_id,
-            "event_type": event_type,
-            "event_data": event_data,
-            "status": status,
-            "attempt": attempt,
-            "error": error,
-        }
-        with self.event_store_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return self.event_processor.store_event(event_id, event_type, event_data, status, attempt, error)
 
     def _dispatch_event(self, event_type: str, event_data: Dict[str, Any]):
         if event_type == "task.created":

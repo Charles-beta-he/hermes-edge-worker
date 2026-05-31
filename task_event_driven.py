@@ -9,32 +9,37 @@
 - dead-letter：超过重试上限后保留事件和错误，避免静默丢失。
 """
 
-import hashlib
 import json
 import sys
-import time
 from typing import Dict, Any
-from datetime import datetime
 from pathlib import Path
 
 # 添加脚本目录到路径
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
+from event_reliability import ReliableEventProcessor
+
 
 class TaskEventDriven:
     """任务事件驱动"""
 
-    def __init__(self, event_bus=None, task_pool=None, orchestrator=None, event_store_path=None, max_retries: int = 2, retry_delay: float = 0.0):
+    def __init__(self, event_bus=None, task_pool=None, orchestrator=None, event_store_path=None, max_retries: int = 2, retry_delay: float = 0.0, max_store_bytes: int = 5 * 1024 * 1024):
         self.event_bus = event_bus
         self.task_pool = task_pool
         self.orchestrator = orchestrator
         self.event_store_path = Path(event_store_path) if event_store_path else SCRIPT_DIR / "event_store.jsonl"
         self.max_retries = max(0, int(max_retries))
         self.retry_delay = max(0.0, float(retry_delay))
+        self.event_processor = ReliableEventProcessor(
+            self.event_store_path,
+            max_retries=self.max_retries,
+            retry_delay=self.retry_delay,
+            max_store_bytes=max_store_bytes,
+        )
         self.handlers = {}
-        self.dead_letters = []
-        self.processed_event_ids = set()
+        self.dead_letters = self.event_processor.dead_letters
+        self.processed_event_ids = self.event_processor.processed_event_ids
         self.metrics = {
             "events_received": 0,
             "tasks_auto_claimed": 0,
@@ -60,42 +65,13 @@ class TaskEventDriven:
         }
 
     def _event_id(self, event_type: str, event_data: Dict[str, Any]) -> str:
-        explicit = event_data.get("event_id") or event_data.get("id")
-        if explicit:
-            return str(explicit)
-        payload = json.dumps({"event_type": event_type, "event_data": event_data}, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(payload.encode()).hexdigest()
+        return self.event_processor.event_id(event_type, event_data)
 
     def _load_processed_events(self):
-        if not self.event_store_path.exists():
-            return
-        try:
-            for line in self.event_store_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                if record.get("status") == "processed" and record.get("event_id"):
-                    self.processed_event_ids.add(record["event_id"])
-                if record.get("status") == "dead_lettered":
-                    self.dead_letters.append(record)
-        except Exception:
-            # Event store corruption should not prevent process startup; new writes still append.
-            pass
+        return None
 
     def _store_event(self, event_id: str, event_type: str, event_data: Dict[str, Any], status: str, attempt: int, error: str = ""):
-        record = {
-            "event_id": event_id,
-            "event_type": event_type,
-            "event_data": event_data,
-            "status": status,
-            "attempt": attempt,
-            "error": error,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-        }
-        self.event_store_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.event_store_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-        return record
+        return self.event_processor.store_event(event_id, event_type, event_data, status, attempt, error or None)
 
     def handle_event(self, event_type: str, event_data: Dict[str, Any]):
         """处理事件。返回结构化状态，供 API/调度器识别重复、成功、死信。"""
@@ -103,38 +79,25 @@ class TaskEventDriven:
         event_id = self._event_id(event_type, event_data)
         self.metrics["events_received"] += 1
 
-        if event_id in self.processed_event_ids:
-            self.metrics["duplicates"] += 1
-            self._store_event(event_id, event_type, event_data, "duplicate", 0)
-            return {"status": "duplicate", "event_id": event_id}
-
         handler = self.handlers.get(event_type)
         if not handler:
             print(f"未知事件类型: {event_type}")
             self._store_event(event_id, event_type, event_data, "ignored", 0, "unknown_event_type")
             return {"status": "ignored", "event_id": event_id, "error": "unknown_event_type"}
 
-        last_error = ""
-        for attempt in range(1, self.max_retries + 2):
-            try:
-                handler(event_data)
-                self.processed_event_ids.add(event_id)
-                self._store_event(event_id, event_type, event_data, "processed", attempt)
-                return {"status": "processed", "event_id": event_id, "attempt": attempt}
-            except Exception as e:
-                last_error = str(e)
-                self.metrics["errors"] += 1
-                self._store_event(event_id, event_type, event_data, "failed_attempt", attempt, last_error)
-                if attempt <= self.max_retries:
-                    self.metrics["retries"] += 1
-                    if self.retry_delay:
-                        time.sleep(self.retry_delay)
-                    continue
-                print(f"事件处理错误: {event_type}, 错误: {e}")
-                record = self._store_event(event_id, event_type, event_data, "dead_lettered", attempt, last_error)
-                self.dead_letters.append(record)
-                self.metrics["dead_lettered"] += 1
-                return {"status": "dead_lettered", "event_id": event_id, "attempt": attempt, "error": last_error}
+        result = self.event_processor.process(event_type, event_data, handler)
+        status = result.get("status")
+        if status == "duplicate":
+            self.metrics["duplicates"] += 1
+        elif status == "dead_lettered":
+            self.metrics["dead_lettered"] += 1
+            self.metrics["errors"] += int(result.get("attempts") or result.get("attempt") or 1)
+        elif status == "processed":
+            attempts = int(result.get("attempts") or result.get("attempt") or 1)
+            if attempts > 1:
+                self.metrics["retries"] += attempts - 1
+                self.metrics["errors"] += attempts - 1
+        return result
 
     def on_task_created(self, event_data: Dict[str, Any]):
         """任务创建时触发"""
