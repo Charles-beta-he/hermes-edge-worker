@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hermes Edge Worker 安装脚本
-# SSL 证书异常时默认 fail-closed；确需跳过校验时显式设置 HERMES_EDGE_ALLOW_INSECURE_SSL=1。
+# SSL 证书异常时默认安全；交互终端可确认临时跳过校验，非交互环境需显式设置 HERMES_EDGE_ALLOW_INSECURE_SSL=1。
 
 set -e
 
@@ -10,12 +10,28 @@ REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/m
 # 检测 SSL 证书链；禁止静默降级 TLS 校验。
 CURL_OPTS="-sSL"
 if ! curl -sSL --connect-timeout 5 "$REPO_URL/install.sh" >/dev/null 2>&1; then
+    echo "[!] 无法验证 GitHub 下载源的 TLS 证书。"
+    echo "    常见原因：公司代理、自签 CA、系统 CA 过旧，或网络被劫持。"
+    echo "    推荐先修复系统 CA/代理证书，或切换到可信网络后重试。"
+
     if [ "${HERMES_EDGE_ALLOW_INSECURE_SSL:-0}" = "1" ]; then
-        echo "[!] 检测到 SSL 问题；按 HERMES_EDGE_ALLOW_INSECURE_SSL=1 显式要求使用不安全模式..."
+        echo "[!] 已检测到 HERMES_EDGE_ALLOW_INSECURE_SSL=1，将按显式要求临时跳过 TLS 校验。"
         CURL_OPTS="-sSLk"
+    elif [ -t 0 ]; then
+        echo ""
+        echo "    临时跳过 TLS 校验可继续安装，但存在下载内容被篡改的风险。"
+        printf "    是否仅本次跳过 TLS 校验继续安装？输入 yes 继续: "
+        read -r confirm_insecure_ssl
+        if [ "$confirm_insecure_ssl" = "yes" ]; then
+            echo "[!] 已按用户确认进入不安全下载模式。"
+            CURL_OPTS="-sSLk"
+        else
+            echo "[✗] 已取消安装。请修复系统 CA/代理证书后重试。"
+            exit 1
+        fi
     else
-        echo "[✗] SSL 证书校验失败，已拒绝继续下载。"
-        echo "    请先修复系统 CA/代理证书；临时测试可设置 HERMES_EDGE_ALLOW_INSECURE_SSL=1。"
+        echo "[✗] 非交互环境中拒绝自动跳过 TLS 校验。"
+        echo "    临时测试可显式设置：HERMES_EDGE_ALLOW_INSECURE_SSL=1"
         exit 1
     fi
 fi
