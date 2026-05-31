@@ -23,6 +23,8 @@ Endpoints:
   GET  /info       → 能力信息
 """
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import shlex
@@ -38,6 +40,7 @@ from urllib.parse import urlparse
 BRAIN_URL = None
 WORKER_NAME = None
 SECURITY_TOKEN = None
+HMAC_SECRET = None
 ALLOWED_COMMANDS = []
 ALLOWED_PATHS = []
 MAX_TIMEOUT = 300
@@ -97,6 +100,7 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
                 'cwd': os.getcwd(),
                 'security': {
                     'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
+                    'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
                     'allowed_commands': ALLOWED_COMMANDS,
                     'allowed_paths': ALLOWED_PATHS,
                     'max_timeout': MAX_TIMEOUT,
@@ -111,7 +115,11 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
             self._json({'success': False, 'error': 'Unauthorized'}, 401)
             return
 
-        body = self._read_body()
+        raw_body = self._read_raw_body()
+        if not self._is_hmac_authorized(raw_body):
+            self._json({'success': False, 'error': 'Invalid signature'}, 401)
+            return
+        body = json.loads(raw_body.decode() or '{}') if raw_body else {}
 
         if path == '/execute':
             task = body.get('task', {})
@@ -123,7 +131,13 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
         else:
             self._json({'error': 'Not found'}, 404)
 
-    def _is_authorized(self):
+    def _is_authorized(self, body=b''):
+        """Return True when token auth and optional HMAC signature are valid."""
+        if not self._is_token_authorized():
+            return False
+        return self._is_hmac_authorized(body)
+
+    def _is_token_authorized(self):
         """Return True when no production token is configured or request has a valid token."""
         if _is_placeholder_secret(SECURITY_TOKEN):
             return True
@@ -131,14 +145,36 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
         auth = self.headers.get('Authorization', '') if hasattr(self, 'headers') else ''
         header_token = self.headers.get('X-Hermes-Token', '') if hasattr(self, 'headers') else ''
         if auth.startswith('Bearer '):
-            return auth[len('Bearer '):].strip() == expected
-        return header_token == expected
+            return hmac.compare_digest(auth[len('Bearer '):].strip(), expected)
+        return hmac.compare_digest(header_token, expected)
 
-    def _read_body(self):
+    def _is_hmac_authorized(self, body=b''):
+        """Validate optional HMAC signature over method/path/timestamp/body."""
+        if _is_placeholder_secret(HMAC_SECRET):
+            return True
+        if isinstance(body, str):
+            body = body.encode()
+        timestamp = self.headers.get('X-Hermes-Timestamp', '') if hasattr(self, 'headers') else ''
+        signature = self.headers.get('X-Hermes-Signature', '') if hasattr(self, 'headers') else ''
+        if not timestamp or not signature:
+            return False
+        method = getattr(self, 'command', 'POST') or 'POST'
+        path = urlparse(getattr(self, 'path', '') or '').path
+        payload = method.upper().encode() + b'\n' + path.encode() + b'\n' + timestamp.encode() + b'\n' + (body or b'')
+        expected = hmac.new(str(HMAC_SECRET).encode(), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature, expected)
+
+    def _read_raw_body(self):
         length = int(self.headers.get('Content-Length', 0))
         if length == 0:
+            return b''
+        return self.rfile.read(length)
+
+    def _read_body(self):
+        raw = self._read_raw_body()
+        if not raw:
             return {}
-        return json.loads(self.rfile.read(length))
+        return json.loads(raw)
 
     def _json(self, data, status=200):
         self.send_response(status)
@@ -348,6 +384,7 @@ def register_with_brain():
             'capabilities': ['run_command', 'read_file', 'write_file', 'list_dir'],
             'security': {
                 'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
+                'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
                 'allowed_commands': ALLOWED_COMMANDS,
                 'allowed_paths': ALLOWED_PATHS,
                 'max_timeout': MAX_TIMEOUT,
@@ -407,12 +444,14 @@ def load_config():
 
 
 def configure_runtime(args, cfg):
-    global BRAIN_URL, WORKER_NAME, args_port, SECURITY_TOKEN, ALLOWED_COMMANDS, ALLOWED_PATHS, MAX_TIMEOUT
+    global BRAIN_URL, WORKER_NAME, args_port, SECURITY_TOKEN, HMAC_SECRET, ALLOWED_COMMANDS, ALLOWED_PATHS, MAX_TIMEOUT
     BRAIN_URL = args.brain_url
     WORKER_NAME = args.name
     args_port = args.port
     token = args.token or os.environ.get('HERMES_EDGE_TOKEN') or cfg.get('token')
+    hmac_secret = args.hmac_secret or os.environ.get('HERMES_EDGE_HMAC_SECRET') or cfg.get('hmac_secret')
     SECURITY_TOKEN = None if _is_placeholder_secret(token) else str(token)
+    HMAC_SECRET = None if _is_placeholder_secret(hmac_secret) else str(hmac_secret)
     ALLOWED_COMMANDS = _as_list(args.allowed_command) or _as_list(cfg.get('allowed_commands'))
     ALLOWED_PATHS = _as_list(args.allowed_path) or _as_list(cfg.get('allowed_paths')) or [str(Path.home())]
     MAX_TIMEOUT = int(args.max_timeout or cfg.get('max_timeout') or 300)
@@ -427,6 +466,7 @@ def main():
     parser.add_argument('--brain-url', default=cfg.get('main_node') or cfg.get('brain_url'), help='Brain API URL')
     parser.add_argument('--name', default=cfg.get('name', 'local-worker'), help='Worker name')
     parser.add_argument('--token', default=None, help='Bearer token required by /info, /execute and /command')
+    parser.add_argument('--hmac-secret', default=None, help='Optional HMAC secret required for POST body signatures')
     parser.add_argument('--allowed-command', action='append', default=[], help='Allowed shell command prefix/token; repeatable')
     parser.add_argument('--allowed-path', action='append', default=[], help='Allowed filesystem sandbox path; repeatable')
     parser.add_argument('--max-timeout', type=int, default=None, help='Maximum command timeout seconds')
@@ -445,7 +485,7 @@ def main():
     if BRAIN_URL:
         print(f"Connected to Brain: {BRAIN_URL}")
     print("Capabilities: run_command, read_file, write_file, list_dir")
-    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
+    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, hmac_required={not _is_placeholder_secret(HMAC_SECRET)}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
     print("Press Ctrl+C to stop")
 
     try:

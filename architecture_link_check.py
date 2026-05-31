@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import sys
 import time
 import requests
@@ -22,6 +23,7 @@ class ArchitectureLinkCheck:
     
     def __init__(self):
         self.results = {
+            "ports_doc": {},
             "components": {},
             "api_endpoints": {},
             "task_pool": {},
@@ -33,25 +35,66 @@ class ArchitectureLinkCheck:
         """检查所有链路"""
         print("=== 架构链路检查 ===\n")
         
-        # 1. 检查组件文件
+        # 1. 检查端口 SSOT 文档
+        self._check_ports_doc_consistency()
+
+        # 2. 检查组件文件
         self._check_components()
         
-        # 2. 检查API端点
+        # 3. 检查API端点
         self._check_api_endpoints()
         
-        # 3. 检查任务池状态
+        # 4. 检查任务池状态
         self._check_task_pool()
         
-        # 4. 检查站点状态
+        # 5. 检查站点状态
         self._check_sites()
         
-        # 5. 测试链路
+        # 6. 测试链路
         self._test_links()
         
-        # 6. 生成报告
+        # 7. 生成报告
         self._generate_report()
         
         return self.results
+    
+    def _verified_ports_from_ports_doc(self):
+        """Parse PORTS.md rows whose status column is exactly verified."""
+        ports_path = SCRIPT_DIR / "PORTS.md"
+        if not ports_path.exists():
+            return set()
+        ports = set()
+        for line in ports_path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("|"):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) < 4:
+                continue
+            if cells[3] != "verified":
+                continue
+            if re.fullmatch(r"\d+", cells[0]):
+                ports.add(int(cells[0]))
+        return ports
+
+    def _check_ports_doc_consistency(self):
+        """Verify PORTS.md matches the architecture link check's verified API ports."""
+        print("1. 检查端口 SSOT 文档:")
+        expected_ports = {9007, 9008, 9009}
+        verified_ports = self._verified_ports_from_ports_doc()
+        missing = sorted(expected_ports - verified_ports)
+        extra = sorted(verified_ports - expected_ports)
+        status = "ok" if not missing and not extra else "mismatch"
+        self.results["ports_doc"] = {
+            "status": status,
+            "expected_verified_ports": sorted(expected_ports),
+            "verified_ports": sorted(verified_ports),
+            "missing_verified_ports": missing,
+            "extra_verified_ports": extra,
+        }
+        if status == "ok":
+            print(f"   ✓ PORTS.md verified ports: {sorted(verified_ports)}")
+        else:
+            print(f"   ✗ PORTS.md verified ports mismatch: missing={missing}, extra={extra}")
     
     def _check_components(self):
         """检查组件文件"""
@@ -329,12 +372,14 @@ class ArchitectureLinkCheck:
         total_tests = len(self.results["link_tests"])
         ok_tests = len([t for t in self.results["link_tests"].values() if t.get("status") == "ok"])
         
+        ports_ok = self.results.get("ports_doc", {}).get("status") == "ok"
+        print(f"PORTS.md: {'正常' if ports_ok else '异常'}")
         print(f"组件文件: {ok_components}/{total_components} 正常")
         print(f"API端点: {ok_endpoints}/{total_endpoints} 正常")
         print(f"链路测试: {ok_tests}/{total_tests} 正常")
         
         # 总体状态
-        if ok_components == total_components and ok_endpoints == total_endpoints and ok_tests == total_tests:
+        if ports_ok and ok_components == total_components and ok_endpoints == total_endpoints and ok_tests == total_tests:
             print("\n总体状态: ✓ 正常")
             self.results["overall_status"] = "ok"
         else:

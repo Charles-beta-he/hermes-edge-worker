@@ -8,8 +8,9 @@ import json
 import os
 import sys
 import subprocess
-from typing import Dict, Any, List
-from datetime import datetime
+import time
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 添加脚本目录到路径
@@ -19,38 +20,87 @@ sys.path.insert(0, str(SCRIPT_DIR))
 class TaskPoolEventIntegration:
     """任务池事件驱动集成"""
     
-    def __init__(self):
+    def __init__(self, event_store_path: Optional[Path] = None, max_retries: int = 2):
         self.orchestrator_path = Path.home() / ".hermes" / "scripts" / "brain_task_orchestrator.py"
         self.dispatch_tick_path = Path.home() / ".hermes" / "scripts" / "brain_task_dispatch_tick.py"
         self.event_driven_path = SCRIPT_DIR / "task_event_driven.py"
+        self.event_store_path = Path(event_store_path) if event_store_path else SCRIPT_DIR / "event_store.jsonl"
+        self.max_retries = max(0, int(max_retries))
+        self.processed_event_ids = set()
+        self.dead_letters: List[Dict[str, Any]] = []
         
         self.metrics = {
             "tasks_processed": 0,
             "tasks_auto_claimed": 0,
             "tasks_auto_executed": 0,
+            "duplicates": 0,
+            "dead_letters": 0,
             "errors": 0
         }
     
     def process_task_event(self, event_type: str, event_data: Dict[str, Any]):
-        """处理任务事件"""
+        """处理任务事件，返回与 9007 一致的可靠 envelope。"""
+        event_data = event_data or {}
+        event_id = event_data.get("event_id") or self._derive_event_id(event_type, event_data)
         task_id = event_data.get("task_id", "")
-        
-        print(f"[集成] 处理事件: {event_type}, 任务: {task_id}")
-        
-        try:
-            if event_type == "task.created":
-                self.on_task_created(event_data)
-            elif event_type == "task.status_changed":
-                self.on_task_status_changed(event_data)
-            elif event_type == "task.dependency_met":
-                self.on_task_dependency_met(event_data)
-            elif event_type == "task.priority_changed":
-                self.on_task_priority_changed(event_data)
-            
-            self.metrics["tasks_processed"] += 1
-        except Exception as e:
-            self.metrics["errors"] += 1
-            print(f"[错误] 处理事件失败: {event_type}, 错误: {e}")
+        print(f"[集成] 处理事件: {event_type}, 任务: {task_id}, event_id: {event_id}")
+
+        if event_id in self.processed_event_ids:
+            self.metrics["duplicates"] += 1
+            result = {"status": "duplicate", "event_id": event_id, "event_type": event_type, "task_id": task_id}
+            self._record_event(event_id, event_type, event_data, "duplicate", 0, None)
+            return result
+
+        last_error = None
+        for attempt in range(1, self.max_retries + 2):
+            try:
+                self._dispatch_event(event_type, event_data)
+                self.processed_event_ids.add(event_id)
+                self.metrics["tasks_processed"] += 1
+                self._record_event(event_id, event_type, event_data, "processed", attempt, None)
+                return {"status": "processed", "event_id": event_id, "event_type": event_type, "task_id": task_id, "attempts": attempt}
+            except Exception as e:
+                last_error = str(e)
+                self.metrics["errors"] += 1
+                print(f"[错误] 处理事件失败: {event_type}, attempt={attempt}, 错误: {e}")
+                if attempt <= self.max_retries:
+                    self._record_event(event_id, event_type, event_data, "failed_attempt", attempt, last_error)
+                    time.sleep(0.01)
+                    continue
+                dead_letter = {"event_id": event_id, "event_type": event_type, "event_data": event_data, "error": last_error}
+                self.dead_letters.append(dead_letter)
+                self.metrics["dead_letters"] += 1
+                self._record_event(event_id, event_type, event_data, "dead_lettered", attempt, last_error)
+                return {"status": "dead_lettered", "event_id": event_id, "event_type": event_type, "task_id": task_id, "error": last_error, "attempts": attempt}
+
+    def _derive_event_id(self, event_type: str, event_data: Dict[str, Any]) -> str:
+        task_id = event_data.get("task_id", "unknown")
+        key_status = event_data.get("new_status") or event_data.get("new_priority") or event_data.get("priority") or "none"
+        return f"{event_type}:{task_id}:{key_status}"
+
+    def _record_event(self, event_id: str, event_type: str, event_data: Dict[str, Any], status: str, attempt: int, error: Optional[str]):
+        self.event_store_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event_id": event_id,
+            "event_type": event_type,
+            "event_data": event_data,
+            "status": status,
+            "attempt": attempt,
+            "error": error,
+        }
+        with self.event_store_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def _dispatch_event(self, event_type: str, event_data: Dict[str, Any]):
+        if event_type == "task.created":
+            self.on_task_created(event_data)
+        elif event_type == "task.status_changed":
+            self.on_task_status_changed(event_data)
+        elif event_type == "task.dependency_met":
+            self.on_task_dependency_met(event_data)
+        elif event_type == "task.priority_changed":
+            self.on_task_priority_changed(event_data)
     
     def on_task_created(self, event_data: Dict[str, Any]):
         """任务创建时触发"""
@@ -181,12 +231,12 @@ class TaskPoolEventAPI:
                         event_data = data.get("event_data", {})
                         
                         # 处理事件
-                        self.integration.process_task_event(event_type, event_data)
+                        result = self.integration.process_task_event(event_type, event_data)
                         
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
-                        self.wfile.write(json.dumps({"status": "ok"}).encode())
+                        self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
                     except Exception as e:
                         self.send_response(500)
                         self.send_header("Content-Type", "application/json")

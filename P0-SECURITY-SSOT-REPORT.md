@@ -18,8 +18,11 @@
 - `SECURITY_TOKEN`
   - 支持 `Authorization: Bearer <token>`。
   - 支持 `X-Hermes-Token: <token>`。
-  - `/health` 默认开放。
-  - `/info`、`/execute`、`/command` 在配置 token 后必须认证。
+  - `/health` 默认开放；`/info`、`/execute`、`/command` 在配置 token 后必须认证。
+- `HMAC_SECRET`
+  - 可选；配置后 POST 请求必须携带 `X-Hermes-Timestamp` 与 `X-Hermes-Signature`。
+  - 签名 payload: `METHOD\nPATH\nTIMESTAMP\nBODY`，算法 HMAC-SHA256。
+  - 用于防止已认证请求体被中间层篡改。
 - `ALLOWED_COMMANDS`
   - `run_command` 必须命中 allowlist。
   - 空 allowlist 默认拒绝 shell 命令。
@@ -36,6 +39,7 @@ CLI 新增：
 ```bash
 python3 edge_worker.py \
   --token "$HERMES_EDGE_TOKEN" \
+  --hmac-secret "$HERMES_EDGE_HMAC_SECRET" \
   --allowed-command git \
   --allowed-command python3 \
   --allowed-path /Users/charles/hermes-edge-worker \
