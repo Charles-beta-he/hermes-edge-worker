@@ -29,6 +29,7 @@ class ArchitectureLinkCheck:
             "api_endpoints": {},
             "task_pool": {},
             "sites": {},
+            "event_reliability": {},
             "link_tests": {}
         }
     
@@ -51,10 +52,13 @@ class ArchitectureLinkCheck:
         # 5. 检查站点状态
         self._check_sites()
         
-        # 6. 测试链路
+        # 6. 检查事件可靠性观测指标
+        self._check_event_reliability_metrics()
+
+        # 7. 测试链路
         self._test_links()
         
-        # 7. 生成报告
+        # 8. 生成报告
         self._generate_report()
         
         return self.results
@@ -250,9 +254,44 @@ class ArchitectureLinkCheck:
             self.results["sites"]["error"] = str(e)
             print(f"   ✗ 站点检查异常: {e}")
     
+    def _check_event_reliability_metrics(self):
+        """检查 9007/9008 事件可靠性观测指标。"""
+        print("\n5. 检查事件可靠性观测:")
+        endpoints = {
+            "event_driven": {"url": "http://localhost:9007/metrics", "name": "事件驱动API"},
+            "task_pool_integration": {"url": "http://localhost:9008/metrics", "name": "任务池事件集成API"},
+        }
+        for endpoint_id, info in endpoints.items():
+            try:
+                response = requests.get(info["url"], timeout=5)
+                if response.status_code == 200:
+                    metrics = response.json()
+                    normalized = {
+                        "status": "ok",
+                        "duplicates": int(metrics.get("duplicates", 0) or 0),
+                        "dead_letters": int(metrics.get("dead_letters", metrics.get("dead_lettered", 0)) or 0),
+                        "retries": int(metrics.get("retries", 0) or 0),
+                        "errors": int(metrics.get("errors", 0) or 0),
+                        "security": metrics.get("security", {}),
+                    }
+                    self.results["event_reliability"][endpoint_id] = normalized
+                    print(f"   ✓ {info['name']}: duplicates={normalized['duplicates']}, dead_letters={normalized['dead_letters']}, retries={normalized['retries']}, errors={normalized['errors']}")
+                elif response.status_code == 401:
+                    self.results["event_reliability"][endpoint_id] = {"status": "auth_required", "url": info["url"]}
+                    print(f"   ⚠ {info['name']}: metrics 需要认证")
+                else:
+                    self.results["event_reliability"][endpoint_id] = {"status": "error", "url": info["url"], "error": f"状态码: {response.status_code}"}
+                    print(f"   ✗ {info['name']}: 状态码 {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                self.results["event_reliability"][endpoint_id] = {"status": "not_running", "url": info["url"]}
+                print(f"   ✗ {info['name']}: 未运行")
+            except Exception as e:
+                self.results["event_reliability"][endpoint_id] = {"status": "error", "url": info["url"], "error": str(e)}
+                print(f"   ✗ {info['name']}: 错误 {e}")
+
     def _test_links(self):
         """测试链路"""
-        print("\n5. 测试链路:")
+        print("\n6. 测试链路:")
         
         # 测试任务创建 → 事件驱动 → 自动认领 → 自动执行
         print("   测试链路1: 任务创建 → 事件驱动 → 自动认领 → 自动执行")
@@ -378,9 +417,15 @@ class ArchitectureLinkCheck:
         ok_tests = len([t for t in self.results["link_tests"].values() if t.get("status") == "ok"])
         
         ports_ok = self.results.get("ports_doc", {}).get("status") == "ok"
+        event_reliability = self.results.get("event_reliability", {})
+        event_reliability_summary = ", ".join(
+            f"{name}={payload.get('status', 'unknown')}"
+            for name, payload in sorted(event_reliability.items())
+        ) or "未采集"
         print(f"PORTS.md: {'正常' if ports_ok else '异常'}")
         print(f"组件文件: {ok_components}/{total_components} 正常")
         print(f"API端点: {ok_endpoints}/{total_endpoints} 正常")
+        print(f"事件可靠性: {event_reliability_summary}")
         print(f"链路测试: {ok_tests}/{total_tests} 正常")
         
         # 总体状态

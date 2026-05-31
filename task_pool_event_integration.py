@@ -16,6 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from event_reliability import ReliableEventProcessor
+from request_security import RequestAuthenticator
 
 class TaskPoolEventIntegration:
     """任务池事件驱动集成"""
@@ -186,10 +187,15 @@ class TaskPoolEventIntegration:
 class TaskPoolEventAPI:
     """任务池事件驱动API"""
     
-    def __init__(self, host: str = "0.0.0.0", port: int = 9008):
+    def __init__(self, host: str = "0.0.0.0", port: int = 9008, authenticator=None):
         self.host = host
         self.port = port
         self.integration = TaskPoolEventIntegration()
+        self.authenticator = authenticator or RequestAuthenticator(
+            token=os.environ.get("HERMES_EVENT_API_TOKEN") or os.environ.get("HERMES_EDGE_TOKEN"),
+            hmac_secret=os.environ.get("HERMES_EVENT_API_HMAC_SECRET") or os.environ.get("HERMES_EDGE_HMAC_SECRET"),
+            max_skew_seconds=int(os.environ.get("HERMES_EVENT_API_HMAC_MAX_SKEW_SECONDS") or os.environ.get("HERMES_EDGE_HMAC_MAX_SKEW_SECONDS") or 300),
+        )
     
     def start(self):
         """启动API"""
@@ -197,6 +203,13 @@ class TaskPoolEventAPI:
         
         class EventHandler(BaseHTTPRequestHandler):
             integration = self.integration
+            authenticator = self.authenticator
+
+            def _json(self, payload, status=200):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=False).encode())
             
             def do_POST(self):
                 """处理POST请求"""
@@ -204,6 +217,9 @@ class TaskPoolEventAPI:
                     try:
                         content_length = int(self.headers.get("Content-Length", 0))
                         body = self.rfile.read(content_length)
+                        if not self.authenticator.authorize(self, body):
+                            self._json({"error": "Unauthorized"}, 401)
+                            return
                         data = json.loads(body)
                         
                         event_type = data.get("event_type")
@@ -211,16 +227,9 @@ class TaskPoolEventAPI:
                         
                         # 处理事件
                         result = self.integration.process_task_event(event_type, event_data)
-                        
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
+                        self._json(result)
                     except Exception as e:
-                        self.send_response(500)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"error": str(e)}).encode())
+                        self._json({"error": str(e)}, 500)
                 else:
                     self.send_response(404)
                     self.send_header("Content-Type", "application/json")
@@ -230,11 +239,12 @@ class TaskPoolEventAPI:
             def do_GET(self):
                 """处理GET请求"""
                 if self.path == "/metrics":
-                    metrics = self.integration.get_metrics()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(metrics).encode())
+                    if not self.authenticator.authorize_token(self):
+                        self._json({"error": "Unauthorized"}, 401)
+                        return
+                    metrics = dict(self.integration.get_metrics())
+                    metrics["security"] = self.authenticator.security_summary()
+                    self._json(metrics)
                 elif self.path == "/health":
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """共享事件可靠性 helper 测试。"""
 
+import gzip
 import json
 
 from event_reliability import ReliableEventProcessor
@@ -53,3 +54,18 @@ def test_reliable_event_processor_rotates_event_store_when_size_limit_exceeded(t
     assert rotated.exists()
     assert rotated.read_text(encoding="utf-8") == "x" * 200
     assert "evt-rotate" in store.read_text(encoding="utf-8")
+
+
+def test_reliable_event_processor_keeps_multiple_generations_and_compresses_older_logs(tmp_path):
+    store = tmp_path / "events.jsonl"
+    store.write_text("active", encoding="utf-8")
+    (tmp_path / "events.jsonl.1").write_text("gen1", encoding="utf-8")
+    (tmp_path / "events.jsonl.2.gz").write_bytes(gzip.compress(b"gen2"))
+
+    processor = ReliableEventProcessor(event_store_path=store, max_store_bytes=1, rotate_generations=3, compress_rotated=True)
+    processor.process("task.created", {"event_id": "evt-retain", "task_id": "task-retain"}, lambda event_data: None)
+
+    assert gzip.decompress((tmp_path / "events.jsonl.1.gz").read_bytes()) == b"active"
+    assert gzip.decompress((tmp_path / "events.jsonl.2.gz").read_bytes()) == b"gen1"
+    assert gzip.decompress((tmp_path / "events.jsonl.3.gz").read_bytes()) == b"gen2"
+    assert "evt-retain" in store.read_text(encoding="utf-8")

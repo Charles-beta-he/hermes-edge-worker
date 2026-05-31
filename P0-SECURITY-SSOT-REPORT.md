@@ -20,9 +20,10 @@
   - 支持 `X-Hermes-Token: <token>`。
   - `/health` 默认开放；`/info`、`/execute`、`/command` 在配置 token 后必须认证。
 - `HMAC_SECRET`
-  - 可选；配置后 POST 请求必须携带 `X-Hermes-Timestamp` 与 `X-Hermes-Signature`。
-  - 签名 payload: `METHOD\nPATH\nTIMESTAMP\nBODY`，算法 HMAC-SHA256。
-  - 默认要求 timestamp 在 ±300 秒窗口内，可通过 `--hmac-max-skew-seconds` / `HERMES_EDGE_HMAC_MAX_SKEW_SECONDS` 调整，降低重放风险。
+  - 可选；配置后 POST 请求必须携带 `X-Hermes-Timestamp`、`X-Hermes-Nonce` 与 `X-Hermes-Signature`。
+  - 签名 payload: `METHOD\nPATH\nTIMESTAMP\nNONCE\nBODY`，算法 HMAC-SHA256。
+  - 默认要求 timestamp 在 ±300 秒窗口内，可通过 `--hmac-max-skew-seconds` / `HERMES_EDGE_HMAC_MAX_SKEW_SECONDS` 调整。
+  - `X-Hermes-Nonce` 在有效窗口内只能使用一次，降低窗口内重放风险。
   - 用于防止已认证请求体被中间层篡改。
 - `ALLOWED_COMMANDS`
   - `run_command` 必须命中 allowlist。
@@ -34,6 +35,18 @@
   - 命令执行 timeout 被配置上限封顶。
 - Brain 注册/心跳会携带认证 header。
 - `/info` 不再暴露 home 路径，改为暴露安全配置摘要。
+
+### 1.1 Event API 安全边界
+
+文件：`request_security.py`、`task_event_driven.py`、`task_pool_event_integration.py`
+
+新增/收紧：
+
+- 9007 `/event` 与 9008 `/event` 复用 `RequestAuthenticator`。
+- 支持 `HERMES_EVENT_API_TOKEN` / `HERMES_EVENT_API_HMAC_SECRET` / `HERMES_EVENT_API_HMAC_MAX_SKEW_SECONDS`。
+- 未配置 Event API 专用变量时回退到 Edge Worker 的 `HERMES_EDGE_TOKEN` / `HERMES_EDGE_HMAC_SECRET` / `HERMES_EDGE_HMAC_MAX_SKEW_SECONDS`。
+- `/health` 保持开放；`/metrics` 配置 token 后需要 token；`/event` 配置 token/HMAC 后需要 token + 签名。
+- Event API HMAC payload 同样为 `METHOD\nPATH\nTIMESTAMP\nNONCE\nBODY`，并要求 nonce 在窗口内不可重放。
 
 CLI 新增：
 
@@ -83,13 +96,25 @@ python3 edge_worker.py \
 ### 局部验证
 
 ```bash
-/usr/bin/python3 -m pytest test_edge_worker_security.py test_edge_worker.py test_task_pool.py test_unified_task_pool.py -q
+/usr/bin/python3 -m pytest \
+  test_edge_worker_security.py \
+  test_request_security.py \
+  test_event_reliability_helper.py \
+  test_event_reliability.py \
+  test_task_event_driven.py \
+  test_task_pool_event_integration.py \
+  test_task_pool_event_integration_reliability.py \
+  test_architecture_event_observability.py \
+  test_architecture_event_payload.py \
+  test_architecture_link_check.py \
+  test_ports_doc_consistency.py \
+  -q
 ```
 
 结果：
 
 ```text
-10 passed
+34 passed, 1 warning
 ```
 
 ### 全量测试
@@ -101,7 +126,7 @@ python3 edge_worker.py \
 结果：
 
 ```text
-171 passed, 12 warnings
+199 passed, 12 warnings
 ```
 
 ### 自检
@@ -128,8 +153,10 @@ architecture_links: PASS
 结果：
 
 ```text
+PORTS.md: OK
 components: 5/5 OK
 API endpoints: 3/3 OK
+event reliability: event_driven=ok, task_pool_integration=ok
 link tests: 4/4 OK
 overall: OK
 ```

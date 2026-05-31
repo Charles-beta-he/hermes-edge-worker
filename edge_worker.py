@@ -40,8 +40,10 @@ from urllib.parse import urlparse
 BRAIN_URL = None
 WORKER_NAME = None
 SECURITY_TOKEN = None
-HMAC_SECRET = None
+HMAC_SECRET=None
 HMAC_MAX_SKEW_SECONDS = 300
+HMAC_NONCE_CACHE = {}
+HMAC_NONCE_CACHE_MAX = 10000
 ALLOWED_COMMANDS = []
 ALLOWED_PATHS = []
 MAX_TIMEOUT = 300
@@ -103,6 +105,7 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
                     'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
                     'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
                     'hmac_max_skew_seconds': HMAC_MAX_SKEW_SECONDS,
+                    'hmac_nonce_cache_size': len(HMAC_NONCE_CACHE),
                     'allowed_commands': ALLOWED_COMMANDS,
                     'allowed_paths': ALLOWED_PATHS,
                     'max_timeout': MAX_TIMEOUT,
@@ -113,7 +116,7 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if not self._is_authorized():
+        if not self._is_token_authorized():
             self._json({'success': False, 'error': 'Unauthorized'}, 401)
             return
 
@@ -157,8 +160,9 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
         if isinstance(body, str):
             body = body.encode()
         timestamp = self.headers.get('X-Hermes-Timestamp', '') if hasattr(self, 'headers') else ''
+        nonce = self.headers.get('X-Hermes-Nonce', '') if hasattr(self, 'headers') else ''
         signature = self.headers.get('X-Hermes-Signature', '') if hasattr(self, 'headers') else ''
-        if not timestamp or not signature:
+        if not timestamp or not nonce or not signature:
             return False
         try:
             timestamp_value = float(timestamp)
@@ -166,11 +170,28 @@ class EdgeWorkerHandler(BaseHTTPRequestHandler):
             return False
         if abs(time.time() - timestamp_value) > float(HMAC_MAX_SKEW_SECONDS or 300):
             return False
+        self._prune_hmac_nonce_cache()
+        if nonce in HMAC_NONCE_CACHE:
+            return False
         method = getattr(self, 'command', 'POST') or 'POST'
         path = urlparse(getattr(self, 'path', '') or '').path
-        payload = method.upper().encode() + b'\n' + path.encode() + b'\n' + timestamp.encode() + b'\n' + (body or b'')
+        payload = method.upper().encode() + b'\n' + path.encode() + b'\n' + timestamp.encode() + b'\n' + nonce.encode() + b'\n' + (body or b'')
         expected = hmac.new(str(HMAC_SECRET).encode(), payload, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(signature, expected)
+        if not hmac.compare_digest(signature, expected):
+            return False
+        HMAC_NONCE_CACHE[nonce] = timestamp_value
+        return True
+
+    def _prune_hmac_nonce_cache(self):
+        now = time.time()
+        max_age = float(HMAC_MAX_SKEW_SECONDS or 300)
+        expired = [nonce for nonce, seen_at in HMAC_NONCE_CACHE.items() if abs(now - float(seen_at)) > max_age]
+        for nonce in expired:
+            HMAC_NONCE_CACHE.pop(nonce, None)
+        if len(HMAC_NONCE_CACHE) <= HMAC_NONCE_CACHE_MAX:
+            return
+        for nonce, _seen_at in sorted(HMAC_NONCE_CACHE.items(), key=lambda item: item[1])[:len(HMAC_NONCE_CACHE) - HMAC_NONCE_CACHE_MAX]:
+            HMAC_NONCE_CACHE.pop(nonce, None)
 
     def _read_raw_body(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -394,6 +415,7 @@ def register_with_brain():
                 'auth_required': not _is_placeholder_secret(SECURITY_TOKEN),
                 'hmac_required': not _is_placeholder_secret(HMAC_SECRET),
                 'hmac_max_skew_seconds': HMAC_MAX_SKEW_SECONDS,
+                'hmac_nonce_cache_size': len(HMAC_NONCE_CACHE),
                 'allowed_commands': ALLOWED_COMMANDS,
                 'allowed_paths': ALLOWED_PATHS,
                 'max_timeout': MAX_TIMEOUT,
@@ -496,7 +518,7 @@ def main():
     if BRAIN_URL:
         print(f"Connected to Brain: {BRAIN_URL}")
     print("Capabilities: run_command, read_file, write_file, list_dir")
-    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, hmac_required={not _is_placeholder_secret(HMAC_SECRET)}, hmac_max_skew_seconds={HMAC_MAX_SKEW_SECONDS}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
+    print(f"Security: auth_required={not _is_placeholder_secret(SECURITY_TOKEN)}, hmac_required={not _is_placeholder_secret(HMAC_SECRET)}, hmac_max_skew_seconds={HMAC_MAX_SKEW_SECONDS}, hmac_nonce_cache_max={HMAC_NONCE_CACHE_MAX}, allowed_commands={ALLOWED_COMMANDS}, allowed_paths={ALLOWED_PATHS}, max_timeout={MAX_TIMEOUT}")
     print("Press Ctrl+C to stop")
 
     try:

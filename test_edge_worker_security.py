@@ -18,6 +18,7 @@ class DummyHandler(edge_worker.EdgeWorkerHandler):
 def configure_security(tmp_path):
     edge_worker.SECURITY_TOKEN = "secret-token"
     edge_worker.HMAC_SECRET = None
+    edge_worker.HMAC_NONCE_CACHE.clear()
     edge_worker.ALLOWED_COMMANDS = ["echo", "python3 -V"]
     edge_worker.ALLOWED_PATHS = [str(tmp_path)]
     edge_worker.MAX_TIMEOUT = 2
@@ -83,23 +84,24 @@ def test_hmac_signature_is_required_when_secret_is_configured(tmp_path):
     handler = DummyHandler()
     handler.path = "/command"
     handler.command = "POST"
-    handler.headers = {"Authorization": "Bearer secret-token", "X-Hermes-Timestamp": timestamp}
+    handler.headers = {"Authorization": "Bearer secret-token", "X-Hermes-Timestamp": timestamp, "X-Hermes-Nonce": "nonce-required"}
 
     assert handler._is_authorized(body) is False
 
-    payload = b"POST\n/command\n" + timestamp.encode() + b"\n" + body
+    payload = b"POST\n/command\n" + timestamp.encode() + b"\nnonce-required\n" + body
     signature = hmac.new(b"hmac-secret", payload, hashlib.sha256).hexdigest()
     handler.headers["X-Hermes-Signature"] = signature
 
     assert handler._is_authorized(body) is True
 
 
-def _signed_headers(body, timestamp):
-    payload = b"POST\n/command\n" + str(timestamp).encode() + b"\n" + body
+def _signed_headers(body, timestamp, nonce="nonce-1"):
+    payload = b"POST\n/command\n" + str(timestamp).encode() + b"\n" + str(nonce).encode() + b"\n" + body
     signature = hmac.new(b"hmac-secret", payload, hashlib.sha256).hexdigest()
     return {
         "Authorization": "Bearer secret-token",
         "X-Hermes-Timestamp": str(timestamp),
+        "X-Hermes-Nonce": str(nonce),
         "X-Hermes-Signature": signature,
     }
 
@@ -110,7 +112,7 @@ def test_hmac_signature_rejects_tampered_body(tmp_path):
     timestamp = "1700000000"
     original_body = b'{"action":"run_command","params":{"command":"echo ok"}}'
     tampered_body = b'{"action":"run_command","params":{"command":"echo hacked"}}'
-    payload = b"POST\n/command\n" + timestamp.encode() + b"\n" + original_body
+    payload = b"POST\n/command\n" + timestamp.encode() + b"\nnonce-tamper\n" + original_body
     signature = hmac.new(b"hmac-secret", payload, hashlib.sha256).hexdigest()
     handler = DummyHandler()
     handler.path = "/command"
@@ -118,6 +120,7 @@ def test_hmac_signature_rejects_tampered_body(tmp_path):
     handler.headers = {
         "Authorization": "Bearer secret-token",
         "X-Hermes-Timestamp": timestamp,
+        "X-Hermes-Nonce": "nonce-tamper",
         "X-Hermes-Signature": signature,
     }
 
@@ -145,6 +148,40 @@ def test_hmac_signature_accepts_timestamp_inside_replay_window(tmp_path):
     handler = DummyHandler()
     handler.path = "/command"
     handler.command = "POST"
-    handler.headers = _signed_headers(body, int(time.time()))
+    handler.headers = _signed_headers(body, int(time.time()), nonce="inside-window")
 
     assert handler._is_authorized(body) is True
+
+
+def test_hmac_signature_rejects_reused_nonce_inside_window(tmp_path):
+    configure_security(tmp_path)
+    edge_worker.HMAC_SECRET = "hmac-secret"
+    edge_worker.HMAC_MAX_SKEW_SECONDS = 300
+    body = b'{"action":"run_command","params":{"command":"echo ok"}}'
+    timestamp = int(time.time())
+    handler = DummyHandler()
+    handler.path = "/command"
+    handler.command = "POST"
+    handler.headers = _signed_headers(body, timestamp, nonce="replay-once")
+
+    assert handler._is_authorized(body) is True
+    assert handler._is_authorized(body) is False
+
+
+def test_hmac_signature_rejects_missing_nonce_when_hmac_enabled(tmp_path):
+    configure_security(tmp_path)
+    edge_worker.HMAC_SECRET = "hmac-secret"
+    body = b'{"action":"run_command","params":{"command":"echo ok"}}'
+    timestamp = int(time.time())
+    payload = b"POST\n/command\n" + str(timestamp).encode() + b"\n\n" + body
+    signature = hmac.new(b"hmac-secret", payload, hashlib.sha256).hexdigest()
+    handler = DummyHandler()
+    handler.path = "/command"
+    handler.command = "POST"
+    handler.headers = {
+        "Authorization": "Bearer secret-token",
+        "X-Hermes-Timestamp": str(timestamp),
+        "X-Hermes-Signature": signature,
+    }
+
+    assert handler._is_authorized(body) is False

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared reliable event envelope processing for Hermes Edge Worker APIs."""
 
+import gzip
 import hashlib
 import json
 import time
@@ -18,11 +19,15 @@ class ReliableEventProcessor:
         max_retries: int = 2,
         retry_delay: float = 0.0,
         max_store_bytes: int = 5 * 1024 * 1024,
+        rotate_generations: int = 1,
+        compress_rotated: bool = False,
     ):
         self.event_store_path = Path(event_store_path)
         self.max_retries = max(0, int(max_retries))
         self.retry_delay = max(0.0, float(retry_delay))
         self.max_store_bytes = max(0, int(max_store_bytes or 0))
+        self.rotate_generations = max(1, int(rotate_generations or 1))
+        self.compress_rotated = bool(compress_rotated)
         self.processed_event_ids = set()
         self.dead_letters = []
         self._load_existing_state()
@@ -100,9 +105,55 @@ class ReliableEventProcessor:
         try:
             if self.event_store_path.stat().st_size <= self.max_store_bytes:
                 return
-            rotated = self.event_store_path.with_name(self.event_store_path.name + ".1")
-            if rotated.exists():
-                rotated.unlink()
-            self.event_store_path.rename(rotated)
+            if self.compress_rotated:
+                self._rotate_compressed()
+            else:
+                rotated = self.event_store_path.with_name(self.event_store_path.name + ".1")
+                if rotated.exists():
+                    rotated.unlink()
+                self.event_store_path.rename(rotated)
         except OSError:
             return
+
+    def _generation_path(self, generation: int):
+        suffix = f".{generation}"
+        if self.compress_rotated:
+            suffix += ".gz"
+        return self.event_store_path.with_name(self.event_store_path.name + suffix)
+
+    def _read_generation_bytes(self, generation: int):
+        gz_path = self.event_store_path.with_name(self.event_store_path.name + f".{generation}.gz")
+        plain_path = self.event_store_path.with_name(self.event_store_path.name + f".{generation}")
+        if gz_path.exists():
+            return gzip.decompress(gz_path.read_bytes())
+        if plain_path.exists():
+            return plain_path.read_bytes()
+        return None
+
+    def _remove_generation_files(self, generation: int):
+        for suffix in (f".{generation}", f".{generation}.gz"):
+            path = self.event_store_path.with_name(self.event_store_path.name + suffix)
+            if path.exists():
+                path.unlink()
+
+    def _write_generation(self, generation: int, data: bytes):
+        self._remove_generation_files(generation)
+        path = self._generation_path(generation)
+        if self.compress_rotated:
+            path.write_bytes(gzip.compress(data))
+        else:
+            path.write_bytes(data)
+
+    def _rotate_compressed(self):
+        for generation in range(self.rotate_generations, 0, -1):
+            data = self._read_generation_bytes(generation)
+            if data is None:
+                continue
+            if generation >= self.rotate_generations:
+                self._remove_generation_files(generation)
+            else:
+                self._write_generation(generation + 1, data)
+                self._remove_generation_files(generation)
+        active = self.event_store_path.read_bytes()
+        self._write_generation(1, active)
+        self.event_store_path.unlink()
