@@ -49,7 +49,7 @@ class RAGKnowledgeManager:
     def __init__(self):
         self.knowledge_base = {}  # 知识库
         self.tokenizer = ChineseTokenizer()  # 中文分词器
-        self.vectorizer = TfidfVectorizer(tokenizer=self.tokenizer.tokenize)  # TF-IDF向量化器
+        self.vectorizer = TfidfVectorizer(tokenizer=self.tokenizer.tokenize, token_pattern=None)  # TF-IDF向量化器
         self.vectors = None  # 向量矩阵
         self.vector_index = {}  # 向量索引
         self.metrics = {

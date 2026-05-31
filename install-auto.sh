@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hermes Edge Worker 一键安装脚本
-# 用户只需运行：curl -sSLk <url> | bash
+# 用户只需下载脚本后执行；避免直接管道执行远程脚本
 # 剩余全部自动化
 
 set -e
@@ -9,7 +9,11 @@ INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 LINK_DIR="$HOME/.local/bin"
 MAIN_NODE="http://192.168.31.71:9001"
-TOKEN="hermes-2024"
+TOKEN="${HERMES_EDGE_TOKEN:-$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)}"
 # 颜色
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -160,7 +164,10 @@ case "${1:-start}" in
         ;;
     update)
         echo "更新Edge Worker..."
-        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh" | bash
+        tmp_install="$(mktemp)"
+        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh" -o "$tmp_install"
+        bash "$tmp_install"
+        rm -f "$tmp_install"
         ;;
     *)
         echo "用法: hermes-edge {start|stop|restart|status|logs|update}"

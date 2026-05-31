@@ -1,9 +1,24 @@
 #!/bin/bash
 # Hermes Edge Worker 安装脚本
+# SSL 证书异常时默认 fail-closed；确需跳过校验时显式设置 HERMES_EDGE_ALLOW_INSECURE_SSL=1。
+
 set -e
 
 INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
+
+# 检测 SSL 证书链；禁止静默降级 TLS 校验。
+CURL_OPTS="-sSL"
+if ! curl -sSL --connect-timeout 5 "$REPO_URL/install.sh" >/dev/null 2>&1; then
+    if [ "${HERMES_EDGE_ALLOW_INSECURE_SSL:-0}" = "1" ]; then
+        echo "[!] 检测到 SSL 问题；按 HERMES_EDGE_ALLOW_INSECURE_SSL=1 显式要求使用不安全模式..."
+        CURL_OPTS="-sSLk"
+    else
+        echo "[✗] SSL 证书校验失败，已拒绝继续下载。"
+        echo "    请先修复系统 CA/代理证书；临时测试可设置 HERMES_EDGE_ALLOW_INSECURE_SSL=1。"
+        exit 1
+    fi
+fi
 
 echo "╔══════════════════════════════════════════════════╗"
 echo "║       Hermes Edge Worker 安装                    ║"
@@ -19,9 +34,9 @@ echo "[✓] Python $(python3 -c 'import sys; print(f"{sys.version_info.major}.{s
 mkdir -p "$INSTALL_DIR"/{logs,backups}
 
 echo "[*] 下载Edge Worker..."
-curl -sSL "$REPO_URL/edge_worker.py" -o "$INSTALL_DIR/edge_worker.py"
-curl -sSL "$REPO_URL/hermes_lan.py" -o "$INSTALL_DIR/hermes_lan.py"
-curl -sSL "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml"
+curl $CURL_OPTS "$REPO_URL/edge_worker.py" -o "$INSTALL_DIR/edge_worker.py"
+curl $CURL_OPTS "$REPO_URL/hermes_lan.py" -o "$INSTALL_DIR/hermes_lan.py"
+curl $CURL_OPTS "$REPO_URL/config.yaml" -o "$INSTALL_DIR/config.yaml"
 
 cat > "$INSTALL_DIR/hermes-edge" << 'CLI_EOF'
 #!/bin/bash

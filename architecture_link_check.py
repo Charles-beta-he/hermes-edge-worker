@@ -10,6 +10,10 @@ import re
 import sys
 import time
 import uuid
+import warnings
+
+warnings.filterwarnings("ignore", message=r"urllib3 v2 only supports OpenSSL.*", category=Warning)
+
 import requests
 from typing import Dict, Any, List
 from datetime import datetime

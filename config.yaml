@@ -12,7 +12,8 @@ worker:
   reconnect_interval: 10
 
 security:
-  token: "your-secret-token"  # 修改为你的token
+  # 默认不写入弱 token；生产使用 HERMES_EDGE_TOKEN 或 CLI --token 注入。
+  token: ""
   allowed_commands: []
   max_timeout: 300
 

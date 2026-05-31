@@ -8,7 +8,11 @@ INSTALL_DIR="$HOME/.hermes/edge-worker"
 REPO_URL="https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main"
 LINK_DIR="$HOME/.local/bin"
 MAIN_NODE="http://192.168.31.71:9001"
-TOKEN="***"
+TOKEN="${HERMES_EDGE_TOKEN:-$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)}"
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -160,7 +164,10 @@ case "${1:-start}" in
         ;;
     update)
         echo "更新Edge Worker..."
-        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-final.sh" | bash
+        tmp_install="$(mktemp)"
+        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-final.sh" -o "$tmp_install"
+        bash "$tmp_install"
+        rm -f "$tmp_install"
         ;;
     *)
         echo "用法: hermes-edge {start|stop|restart|status|logs|update}"

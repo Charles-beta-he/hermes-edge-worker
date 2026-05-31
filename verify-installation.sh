@@ -62,11 +62,11 @@ if [ -f "$HOME/.hermes/edge-worker/config.yaml" ]; then
         echo "   请检查: main_node: \"http://192.168.31.71:9001\""
     fi
     
-    if grep -q "token.*hermes-2024" "$HOME/.hermes/edge-worker/config.yaml"; then
-        pass "Token配置正确"
+    if grep -Eq "token: \"[^\"]{24,}\"" "$HOME/.hermes/edge-worker/config.yaml"; then
+        pass "Token配置存在且非弱默认值"
     else
         warn "Token配置可能不正确"
-        echo "   请检查: token: \"hermes-2024\""
+        echo "   请检查: security.token 应为随机值，或通过 HERMES_EDGE_TOKEN 注入"
     fi
 else
     fail "配置文件不存在"
