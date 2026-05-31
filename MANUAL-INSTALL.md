@@ -1,27 +1,50 @@
 # Hermes Edge Worker 手动安装指南
 
-## 问题描述
+## 适用场景
 
-如果遇到SSL证书错误：
-```
-curl: (60) SSL: no alternative certificate subject name matches target host name 'raw.githubusercontent.com'
-```
+当一键安装失败、网络环境受限、公司代理/自签 CA 导致 TLS 校验失败，或需要逐步排查时，使用本指南。
 
-请使用以下方法之一安装。
-
-## 方法1：使用insecure版本安装脚本
+## 推荐方法：下载脚本后执行
 
 ```bash
-curl -sSLk https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-insecure.sh | bash
+curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh -o install.sh
+bash install.sh
 ```
 
-注意：`-k` 选项跳过SSL验证，仅在信任网络环境使用。
+如果需要自动生成配置并启动服务：
 
-## 方法2：手动下载安装
+```bash
+curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh -o install-auto.sh
+bash install-auto.sh
+```
+
+## TLS 证书错误处理
+
+如果遇到类似错误：
+
+```text
+curl: (60) SSL certificate problem
+```
+
+优先处理：
+1. 修复系统 CA 证书。
+2. 导入公司代理/自签 CA。
+3. 切换可信网络。
+4. 使用浏览器从 GitHub 下载脚本后本地执行。
+
+仅临时测试、且你理解下载内容可能被篡改的风险时，允许对已下载脚本显式打开逃生口：
+
+```bash
+HERMES_EDGE_ALLOW_INSECURE_SSL=1 bash install.sh
+```
+
+不要把跳过 TLS 校验的管道执行作为默认安装路径。
+
+## 手动下载安装
 
 ### 步骤1：下载文件
 
-在浏览器中访问以下URL，下载文件：
+在浏览器中访问以下 URL，下载文件：
 
 1. https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/edge_worker.py
 2. https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/hermes_lan.py
@@ -38,7 +61,7 @@ mkdir -p ~/.local/bin
 
 将下载的文件复制到 `~/.hermes/edge-worker/` 目录。
 
-### 步骤4：创建CLI包装器
+### 步骤4：创建 CLI 包装器
 
 创建文件 `~/.hermes/edge-worker/hermes-edge`：
 
@@ -51,7 +74,7 @@ case "$1" in
         if [ "$2" = "--daemon" ]; then
             nohup python3 "$SCRIPT_DIR/edge_worker.py" > "$SCRIPT_DIR/logs/worker.log" 2>&1 &
             echo $! > "$SCRIPT_DIR/worker.pid"
-            echo "✓ 已启动（后台）"
+            echo "已启动（后台）"
         else
             python3 "$SCRIPT_DIR/edge_worker.py"
         fi
@@ -60,14 +83,15 @@ case "$1" in
         if [ -f "$SCRIPT_DIR/worker.pid" ]; then
             kill $(cat "$SCRIPT_DIR/worker.pid") 2>/dev/null
             rm "$SCRIPT_DIR/worker.pid"
-            echo "✓ 已停止"
+            echo "已停止"
         fi
         ;;
     status)
         if [ -f "$SCRIPT_DIR/worker.pid" ] && kill -0 $(cat "$SCRIPT_DIR/worker.pid") 2>/dev/null; then
-            echo "✓ 运行中 (PID: $(cat $SCRIPT_DIR/worker.pid))"
+            PID=$(cat "$SCRIPT_DIR/worker.pid")
+            echo "运行中 PID: $PID"
         else
-            echo "✗ 未运行"
+            echo "未运行"
         fi
         ;;
     logs)
@@ -93,74 +117,50 @@ ln -sf ~/.hermes/edge-worker/hermes-edge ~/.local/bin/hermes-edge
 hermes-edge status
 ```
 
-## 方法3：使用wget代替curl
-
-```bash
-wget -qO- https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh | bash
-```
-
-或跳过SSL验证：
-```bash
-wget --no-check-certificate -qO- https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh | bash
-```
-
-## 方法4：使用代理
-
-如果网络环境需要代理：
+## 使用代理
 
 ```bash
 export http_proxy=http://your-proxy:port
 export https_proxy=http://your-proxy:port
-curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install.sh -o install.sh
+bash install.sh
 ```
 
-## 方法5：使用gh CLI
+## 使用 gh CLI
 
-如果安装了GitHub CLI：
+如果安装了 GitHub CLI：
 
 ```bash
-gh api repos/Charles-beta-he/hermes-edge-worker/contents/install.sh --jq '.content' | base64 -d | bash
+gh api repos/Charles-beta-he/hermes-edge-worker/contents/install.sh --jq '.content' | base64 -d > install.sh
+bash install.sh
 ```
 
 ## 配置说明
 
 安装后编辑配置文件：
+
 ```bash
 nano ~/.hermes/edge-worker/config.yaml
 ```
 
-修改以下内容：
-```yaml
-worker:
-  name: "your-hostname"  # 修改为你的主机名
-  port: 9001
-  main_node: "http://192.168.31.71:9001"  # 主节点地址
+生产/长期使用时，`security.token` 应为强随机值；推荐通过 `HERMES_EDGE_TOKEN` 注入或手动写入配置。
 
-security:
-  token: "hermes-2024"  # 认证token
-```
+## 故障排查
 
-## 验证连接
+### Python 版本
 
 ```bash
-# 测试本地
-hermes-edge status
+python3 --version
+```
 
-# 测试主节点
+### 主节点连通
+
+```bash
 curl http://192.168.31.71:9001/health
 ```
 
-## 常见问题
+### 日志
 
-### Q: SSL错误怎么办？
-A: 使用 `install-insecure.sh` 或手动下载安装。
-
-### Q: 无法访问GitHub怎么办？
-A: 使用代理或手动下载文件。
-
-### Q: Python版本太低怎么办？
-A: 升级到Python 3.8+。
-
----
-
-**最后更新**: 2026-05-30
+```bash
+hermes-edge logs
+```

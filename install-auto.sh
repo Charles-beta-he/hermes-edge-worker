@@ -55,8 +55,27 @@ mkdir -p "$LINK_DIR"
 info "下载组件..."
 CURL_OPTS="-sSL"
 if ! curl -sSL --connect-timeout 5 "$REPO_URL/version.txt" >/dev/null 2>&1; then
-    CURL_OPTS="-sSLk"
-    warn "检测到SSL问题，使用安全模式"
+    warn "无法验证 GitHub 下载源的 TLS 证书。"
+    warn "常见原因：公司代理、自签 CA、系统 CA 过旧，或网络被劫持。"
+    warn "推荐先修复系统 CA/代理证书，或切换到可信网络后重试。"
+    if [ "${HERMES_EDGE_ALLOW_INSECURE_SSL:-0}" = "1" ]; then
+        warn "已检测到 HERMES_EDGE_ALLOW_INSECURE_SSL=1，将按显式要求临时跳过 TLS 校验。"
+        CURL_OPTS="-sSLk"
+    elif [ -t 0 ]; then
+        echo ""
+        echo "    临时跳过 TLS 校验可继续安装，但存在下载内容被篡改的风险。"
+        printf "    是否仅本次跳过 TLS 校验继续安装？输入 yes 继续: "
+        read -r confirm_insecure_ssl
+        if [ "$confirm_insecure_ssl" = "yes" ]; then
+            warn "已按用户确认进入不安全下载模式。"
+            CURL_OPTS="-sSLk"
+        else
+            error "已取消安装。请修复系统 CA/代理证书后重试。"
+        fi
+    else
+        warn "非交互环境中拒绝自动跳过 TLS 校验。"
+        error "临时测试可显式设置：HERMES_EDGE_ALLOW_INSECURE_SSL=1"
+    fi
 fi
 
 curl $CURL_OPTS "$REPO_URL/edge_worker.py" -o "$INSTALL_DIR/edge_worker.py"
@@ -165,7 +184,7 @@ case "${1:-start}" in
     update)
         echo "更新Edge Worker..."
         tmp_install="$(mktemp)"
-        curl -sSLk "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh" -o "$tmp_install"
+        curl -sSL "https://raw.githubusercontent.com/Charles-beta-he/hermes-edge-worker/main/install-auto.sh" -o "$tmp_install" || { echo "更新脚本下载失败；如为 TLS 证书问题，请先修复 CA/代理证书，或手动运行 HERMES_EDGE_ALLOW_INSECURE_SSL=1 bash install-auto.sh"; rm -f "$tmp_install"; exit 1; }
         bash "$tmp_install"
         rm -f "$tmp_install"
         ;;
