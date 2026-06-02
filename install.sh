@@ -17,11 +17,20 @@ if ! curl -sSL --connect-timeout 5 "$REPO_URL/install.sh" >/dev/null 2>&1; then
     if [ "${HERMES_EDGE_ALLOW_INSECURE_SSL:-0}" = "1" ]; then
         echo "[!] 已检测到 HERMES_EDGE_ALLOW_INSECURE_SSL=1，将按显式要求临时跳过 TLS 校验。"
         CURL_OPTS="-sSLk"
-    elif [ -t 0 ]; then
+    else
         echo ""
         echo "    临时跳过 TLS 校验可继续安装，但存在下载内容被篡改的风险。"
+        echo "    如果你是通过 curl ... | bash 启动，stdin 会被管道占用；安装器会尝试改用 /dev/tty 读取本次确认。"
         printf "    是否仅本次跳过 TLS 校验继续安装？输入 yes 继续: "
-        read -r confirm_insecure_ssl
+        confirm_insecure_ssl=""
+        if [ -t 0 ]; then
+            read -r confirm_insecure_ssl
+        elif ! read -r confirm_insecure_ssl < /dev/tty 2>/dev/null; then
+            echo ""
+            echo "[✗] 非交互环境中拒绝自动跳过 TLS 校验。"
+            echo "    临时测试可显式设置：HERMES_EDGE_ALLOW_INSECURE_SSL=1"
+            exit 1
+        fi
         if [ "$confirm_insecure_ssl" = "yes" ]; then
             echo "[!] 已按用户确认进入不安全下载模式。"
             CURL_OPTS="-sSLk"
@@ -29,10 +38,6 @@ if ! curl -sSL --connect-timeout 5 "$REPO_URL/install.sh" >/dev/null 2>&1; then
             echo "[✗] 已取消安装。请修复系统 CA/代理证书后重试。"
             exit 1
         fi
-    else
-        echo "[✗] 非交互环境中拒绝自动跳过 TLS 校验。"
-        echo "    临时测试可显式设置：HERMES_EDGE_ALLOW_INSECURE_SSL=1"
-        exit 1
     fi
 fi
 
